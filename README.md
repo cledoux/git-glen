@@ -1,10 +1,27 @@
 # Glen — Guided Git Workflows (`git-glen`)
 
-An Antigravity plugin, standalone CLI (`glen` / `git glen`), and Go library
-(`git-glen/worktree`) that gently guides day-to-day Git and GitHub
+A guided Git workflow plugin, standalone CLI (`glen` / `git glen`), and Go
+library (`git-glen/worktree`) that gently guides day-to-day Git and GitHub
 workflows—from **Pure Bare Repository Root** initialization and isolated branch
 worktrees to atomic commits, pull request reviews, and clean post-merge
 teardown.
+
+### Repository Layout
+
+```text
+git-glen/
+├── Makefile                    # Root build, test, and symlink installation
+├── plugin.json                 # Antigravity plugin manifest
+├── assets/                     # Plugin logo assets
+├── rules/
+│   └── AGENTS.md               # Always-on workflow & Pure Bare topology rules
+├── skills/                     # Workflow skills (commit, shipit, submit, worktree, worktree-init)
+├── bin/                        # Compiled binaries (bin/glen, bin/git-glen)
+└── src/                        # Go module (git-glen)
+    ├── cmd/glen/               # Standalone CLI entrypoint
+    ├── worktree/               # Exported Go package (init, manager, topology)
+    └── internal/testutil/      # Hermetic Git workspace test fixtures
+```
 
 ## Bundled Plugin Components
 
@@ -36,9 +53,27 @@ teardown.
     └── sigterm/            # Branch: fix/sigterm
 ```
 
-## CLI Usage (`glen` / `git glen`)
+## Installation (`make install`)
 
-Build `bin/glen` and `bin/git-glen` with `make build`:
+Run `make install` to compile `bin/glen` and `bin/git-glen` and symlink the CLI
+binaries and Antigravity plugin components into your local environment:
+
+```bash
+make install
+```
+
+By default, `make install` creates direct symlinks:
+
+- `~/.local/bin/glen` -> `<repo>/bin/glen`
+- `~/.local/bin/git-glen` -> `<repo>/bin/git-glen` (enables
+  `git glen <subcommand>`)
+- `~/.gemini/config/plugins/glen/{plugin.json,README.md,assets,rules,skills}` ->
+  `<repo>/{plugin.json,README.md,assets,rules,skills}`
+
+Restart Antigravity (or reload the window) for the newly installed plugin to be
+discovered.
+
+## CLI Usage (`glen` / `git glen`)
 
 ```bash
 # Initialize, convert, migrate, or repair a repository into Pure Bare topology
@@ -56,18 +91,3 @@ glen remove <branch-or-slug> [-C <dir>]
 # Prune stale worktree metadata and locks
 glen prune [-C <dir>]
 ```
-
-Because `make build` also produces `bin/git-glen`, placing `bin/` on your
-`$PATH` enables native Git subcommand invocation (`git glen init`,
-`git glen create`, `git glen list`, `git glen remove`).
-
-## Antigravity Plugin Installation
-
-Symlink this repository into your global Antigravity plugins directory:
-
-```bash
-ln -s /path/to/git-glen/main ~/.gemini/config/plugins/glen
-```
-
-Restart Antigravity (or reload the window) for the newly symlinked plugin
-directory to be discovered.
