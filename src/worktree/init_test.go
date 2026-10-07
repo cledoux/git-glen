@@ -238,6 +238,12 @@ func TestInitBareRepo(t *testing.T) {
 		t.Errorf("failed to read main/README.md or content mismatch: %v (content: %s)", err, string(content))
 	}
 
+	mainGemini := filepath.Join(targetDir, "main", "GEMINI.md")
+	geminiContent, err := os.ReadFile(mainGemini)
+	if err != nil || !strings.Contains(string(geminiContent), PureBareGuardMarker) {
+		t.Errorf("failed to read main/GEMINI.md or missing guard marker: %v", err)
+	}
+
 	// Verify no dedicated worktrees/ container is created
 	wtDir := filepath.Join(targetDir, "worktrees")
 	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
@@ -491,4 +497,85 @@ func TestInitDispatch(t *testing.T) {
 	if res2.Scenario != ScenarioBareRepair {
 		t.Errorf("expected ScenarioBareRepair, got %s", res2.Scenario)
 	}
+}
+
+func TestEnsureWorkspaceGuard(t *testing.T) {
+	t.Run("CreatesGEMINIWhenMissing", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := EnsureWorkspaceGuard(dir); err != nil {
+			t.Fatalf("EnsureWorkspaceGuard failed: %v", err)
+		}
+		content, err := os.ReadFile(filepath.Join(dir, "GEMINI.md"))
+		if err != nil {
+			t.Fatalf("failed to read created GEMINI.md: %v", err)
+		}
+		if !strings.Contains(string(content), PureBareGuardMarker) {
+			t.Errorf("expected GEMINI.md to contain marker %s", PureBareGuardMarker)
+		}
+		if !strings.Contains(string(content), "Pure Bare Worktree Discipline") {
+			t.Errorf("expected GEMINI.md to contain tripwire heading")
+		}
+	})
+
+	t.Run("AppendsToExistingGEMINI", func(t *testing.T) {
+		dir := t.TempDir()
+		geminiPath := filepath.Join(dir, "GEMINI.md")
+		initial := "# Custom Project\n\nExisting instructions.\n"
+		if err := os.WriteFile(geminiPath, []byte(initial), 0644); err != nil {
+			t.Fatalf("failed to write initial GEMINI.md: %v", err)
+		}
+
+		if err := EnsureWorkspaceGuard(dir); err != nil {
+			t.Fatalf("EnsureWorkspaceGuard failed: %v", err)
+		}
+
+		content, err := os.ReadFile(geminiPath)
+		if err != nil {
+			t.Fatalf("failed to read GEMINI.md: %v", err)
+		}
+		str := string(content)
+		if !strings.HasPrefix(str, "# Custom Project") {
+			t.Errorf("expected initial content preserved, got: %s", str)
+		}
+		if !strings.Contains(str, PureBareGuardMarker) {
+			t.Errorf("expected marker in content")
+		}
+
+		// Idempotency: call again, ensure not duplicated
+		if err := EnsureWorkspaceGuard(dir); err != nil {
+			t.Fatalf("second EnsureWorkspaceGuard failed: %v", err)
+		}
+		content2, err := os.ReadFile(geminiPath)
+		if err != nil {
+			t.Fatalf("failed to read GEMINI.md on second call: %v", err)
+		}
+		if strings.Count(string(content2), PureBareGuardMarker) != 1 {
+			t.Errorf("expected exactly 1 marker after repeated call, got %d", strings.Count(string(content2), PureBareGuardMarker))
+		}
+	})
+
+	t.Run("AppendsToExistingAGENTSWhenPresent", func(t *testing.T) {
+		dir := t.TempDir()
+		agentsPath := filepath.Join(dir, "AGENTS.md")
+		initial := "# Agent Guidelines\n"
+		if err := os.WriteFile(agentsPath, []byte(initial), 0644); err != nil {
+			t.Fatalf("failed to write initial AGENTS.md: %v", err)
+		}
+
+		if err := EnsureWorkspaceGuard(dir); err != nil {
+			t.Fatalf("EnsureWorkspaceGuard failed: %v", err)
+		}
+
+		content, err := os.ReadFile(agentsPath)
+		if err != nil {
+			t.Fatalf("failed to read AGENTS.md: %v", err)
+		}
+		if !strings.Contains(string(content), PureBareGuardMarker) {
+			t.Errorf("expected marker in AGENTS.md")
+		}
+		// Verify GEMINI.md was not redundantly created
+		if _, err := os.Stat(filepath.Join(dir, "GEMINI.md")); !os.IsNotExist(err) {
+			t.Errorf("expected GEMINI.md to not be created when AGENTS.md exists")
+		}
+	})
 }
