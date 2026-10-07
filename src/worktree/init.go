@@ -323,7 +323,7 @@ func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "branch", "--set-upstream-to=origin/"+branch, branch)
 	_ = cmd.Run()
 
-	_ = EnsureWorkspaceGuard(mainDir)
+	_ = EnsureWorkspaceGuard(absTarget)
 
 	return &InitResult{
 		Scenario:      ScenarioRemoteClone,
@@ -413,7 +413,7 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false")
 	_ = cmd.Run()
 
-	_ = EnsureWorkspaceGuard(mainDir)
+	_ = EnsureWorkspaceGuard(absClone)
 
 	return &InitResult{
 		Scenario:      ScenarioCloneConvert,
@@ -474,7 +474,7 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 		branch = "main"
 	}
 
-	_ = EnsureWorkspaceGuard(mainDir)
+	_ = EnsureWorkspaceGuard(absRoot)
 
 	return &InitResult{
 		Scenario:      ScenarioBareRepair,
@@ -564,7 +564,7 @@ func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*In
 	// 9. Remove empty legacy worktrees container if unused
 	_ = os.Remove(filepath.Join(absRoot, "worktrees"))
 
-	_ = EnsureWorkspaceGuard(mainDir)
+	_ = EnsureWorkspaceGuard(absRoot)
 
 	return &InitResult{
 		Scenario:      ScenarioLegacyMigrate,
@@ -625,7 +625,7 @@ func (m *Manager) InitGreenfield(ctx context.Context, targetDir string) (*InitRe
 	// 4. Initial commit in main
 	readmePath := filepath.Join(mainDir, "README.md")
 	_ = os.WriteFile(readmePath, []byte("# Project\n\nInitialized with `glen init`.\n"), 0644)
-	_ = EnsureWorkspaceGuard(mainDir)
+	_ = EnsureWorkspaceGuard(absTarget)
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "add", "-A")
 	_ = cmd.Run()
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "commit", "-m", "Initial commit")
@@ -640,18 +640,20 @@ func (m *Manager) InitGreenfield(ctx context.Context, targetDir string) (*InitRe
 	}, nil
 }
 
-// EnsureWorkspaceGuard ensures that mainDir contains a local GEMINI.md (or AGENTS.md)
-// with the Pure Bare guardrail tripwire.
-func EnsureWorkspaceGuard(mainDir string) error {
-	if mainDir == "" {
+// EnsureWorkspaceGuard ensures that rootDir (the Pure Bare workspace root) contains a
+// workspace GEMINI.md (or AGENTS.md) with the Pure Bare guardrail tripwire.
+// Note: This file is written strictly to rootDir (outside of main/ or any working tree),
+// ensuring it is never tracked, staged, or committed to the repository.
+func EnsureWorkspaceGuard(rootDir string) error {
+	if rootDir == "" {
 		return nil
 	}
-	if info, err := os.Stat(mainDir); err != nil || !info.IsDir() {
+	if info, err := os.Stat(rootDir); err != nil || !info.IsDir() {
 		return nil
 	}
 
-	geminiPath := filepath.Join(mainDir, "GEMINI.md")
-	agentsPath := filepath.Join(mainDir, "AGENTS.md")
+	geminiPath := filepath.Join(rootDir, "GEMINI.md")
+	agentsPath := filepath.Join(rootDir, "AGENTS.md")
 
 	targetPath := geminiPath
 	if _, err := os.Stat(geminiPath); os.IsNotExist(err) {
