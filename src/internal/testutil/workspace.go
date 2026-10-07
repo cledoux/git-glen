@@ -49,8 +49,9 @@ func RunGitEnv(t *testing.T, dir string, env []string, args ...string) string {
 		}
 	}
 
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
 	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Env, env...)
 	}
 
 	var stdout, stderr bytes.Buffer

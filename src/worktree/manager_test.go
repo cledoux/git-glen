@@ -13,6 +13,7 @@ import (
 // setupBareRepoTestEnv creates a pure bare repository topology (.bare + main) for testing.
 func setupBareRepoTestEnv(t *testing.T) (string, string, *Manager) {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	rootDir := t.TempDir()
 	bareDir := filepath.Join(rootDir, ".bare")
 	seedDir := filepath.Join(rootDir, "seed")
@@ -336,6 +337,7 @@ func TestEnsureBareRepoConfig(t *testing.T) {
 
 // TestWorktreeLifecycleAndConfigIsolation preserves regression tests for standard non-bare setups.
 func TestWorktreeLifecycleAndConfigIsolation(t *testing.T) {
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 
