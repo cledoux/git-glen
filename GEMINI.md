@@ -11,7 +11,7 @@ git-glen/
 ├── Makefile                    # Root build, test, and symlink installation
 ├── plugin.json                 # Antigravity plugin manifest
 ├── assets/                     # Plugin logo assets
-├── rules/                      # Always-on Antigravity rules (AGENTS.md)
+├── rules/                      # Modular Antigravity rules (pure-bare-worktrees.md)
 ├── skills/                     # Workflow skills (worktree, worktree-init, commit, submit, shipit)
 ├── bin/                        # Compiled binaries (bin/glen, bin/git-glen)
 └── src/                        # Go module (git-glen)
@@ -29,3 +29,14 @@ make install    # Build and symlink binaries to ~/.local/bin and plugin files to
 make uninstall  # Remove installed symlinks
 make clean      # Clean build artifacts
 ```
+
+<!-- glen:pure-bare-guard -->
+
+## Pure Bare Worktree Discipline
+
+This repository uses the Pure Bare topology (`.bare/` + `main/` + `<branch>/`).
+
+- NEVER edit feature or bugfix code directly in `main/`.
+- NEVER run working-tree Git commands at the workspace root.
+- ALWAYS use `glen create <branch-name>` or the `worktree` skill before
+  modifying code.

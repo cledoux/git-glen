@@ -14,7 +14,7 @@ git-glen/
 ├── plugin.json                 # Antigravity plugin manifest
 ├── assets/                     # Plugin logo assets
 ├── rules/
-│   └── AGENTS.md               # Always-on workflow & Pure Bare topology rules
+│   └── pure-bare-worktrees.md  # Modular workflow & Pure Bare topology rules
 ├── skills/                     # Workflow skills (commit, shipit, submit, worktree, worktree-init)
 ├── bin/                        # Compiled binaries (bin/glen, bin/git-glen)
 └── src/                        # Go module (git-glen)
@@ -25,14 +25,14 @@ git-glen/
 
 ## Bundled Plugin Components
 
-| Component                 | Path                            | Description                                                                                                                                                                                                                            |
-| :------------------------ | :------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Always-On Rule**        | `rules/AGENTS.md`               | Enforces Pure Bare root awareness, feature worktree isolation (`<root>/<branch-name>`), per-worktree `core.bare=false` & author config, Antigravity sandbox rules for `.bare` mutations, and safe PR merges without `--delete-branch`. |
-| **`worktree` Skill**      | `skills/worktree/SKILL.md`      | Day-to-day runbook for inspecting, creating, working within, pushing, and tearing down isolated branch worktrees via `glen` (`list`, `create`, `remove`, `prune`). Includes `references/pure-bare-topology.md`.                        |
-| **`worktree-init` Skill** | `skills/worktree-init/SKILL.md` | 5-scenario repository initialization, in-place standard clone conversion (with zero-tolerance dirty-tree guard), legacy `repo/` sibling migration, and worktree pointer/lock repair via `glen init`.                                   |
-| **`commit` Skill**        | `skills/commit/SKILL.md`        | Branch-based atomic commit workflow and pull request creation/update for code review across isolated worktrees.                                                                                                                        |
-| **`submit` Skill**        | `skills/submit/SKILL.md`        | Single-PR submission, CI/review verification, server-side branch cleanup (`delete_branch_on_merge`), `<root>/main` synchronization, and post-merge worktree teardown.                                                                  |
-| **`shipit` Skill**        | `skills/shipit/SKILL.md`        | Fast-path atomic commit and direct push workflow, bypassing PR overhead for single commits, documentation, ADRs, or lightweight changes.                                                                                               |
+| Component                 | Path                            | Description                                                                                                                                                                                                     |
+| :------------------------ | :------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Plugin Rule**           | `rules/pure-bare-worktrees.md`  | Enforces Pure Bare root awareness, feature worktree isolation (`<root>/<branch-name>`), mandatory Glen/skill delegation, Antigravity sandbox rules, and safe PR merges without `--delete-branch`.               |
+| **`worktree` Skill**      | `skills/worktree/SKILL.md`      | Day-to-day runbook for inspecting, creating, working within, pushing, and tearing down isolated branch worktrees via `glen` (`list`, `create`, `remove`, `prune`). Includes `references/pure-bare-topology.md`. |
+| **`worktree-init` Skill** | `skills/worktree-init/SKILL.md` | 5-scenario repository initialization, in-place standard clone conversion (with zero-tolerance dirty-tree guard), legacy `repo/` sibling migration, and worktree pointer/lock repair via `glen init`.            |
+| **`commit` Skill**        | `skills/commit/SKILL.md`        | Branch-based atomic commit workflow and pull request creation/update for code review across isolated worktrees.                                                                                                 |
+| **`submit` Skill**        | `skills/submit/SKILL.md`        | Single-PR submission, CI/review verification, server-side branch cleanup (`delete_branch_on_merge`), `<root>/main` synchronization, and post-merge worktree teardown.                                           |
+| **`shipit` Skill**        | `skills/shipit/SKILL.md`        | Fast-path atomic commit and direct push workflow, bypassing PR overhead for single commits, documentation, ADRs, or lightweight changes.                                                                        |
 
 ## Pure Bare Repository Topology Overview
 
