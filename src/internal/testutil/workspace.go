@@ -82,6 +82,7 @@ func fixPermissions(root string) {
 // It returns rootDir, bareDir (.bare), and mainDir (main worktree).
 func SetupPureBareWorkspace(t *testing.T) (rootDir, bareDir, mainDir string) {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	rootDir = t.TempDir()
 	t.Cleanup(func() { fixPermissions(rootDir) })
 
@@ -121,6 +122,7 @@ func SetupPureBareWorkspace(t *testing.T) (rootDir, bareDir, mainDir string) {
 // If dirty is true, it introduces uncommitted modifications and untracked files.
 func SetupStandardClone(t *testing.T, dirty bool) string {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	cloneDir := t.TempDir()
 	t.Cleanup(func() { fixPermissions(cloneDir) })
 
@@ -157,6 +159,7 @@ func SetupDirtyClone(t *testing.T) string {
 // SetupLegacySiblingLayout creates a root directory containing repo/ (standard clone) and worktrees/.
 func SetupLegacySiblingLayout(t *testing.T) (rootDir, repoDir, worktreesDir string) {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	rootDir = t.TempDir()
 	t.Cleanup(func() { fixPermissions(rootDir) })
 
@@ -188,6 +191,7 @@ func SetupLegacySiblingLayout(t *testing.T) (rootDir, repoDir, worktreesDir stri
 // SetupGreenfieldDirectory creates an empty temporary directory.
 func SetupGreenfieldDirectory(t *testing.T) string {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	return t.TempDir()
 }
 

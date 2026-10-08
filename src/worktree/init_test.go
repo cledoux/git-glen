@@ -238,10 +238,16 @@ func TestInitBareRepo(t *testing.T) {
 		t.Errorf("failed to read main/README.md or content mismatch: %v (content: %s)", err, string(content))
 	}
 
-	mainGemini := filepath.Join(targetDir, "main", "GEMINI.md")
-	geminiContent, err := os.ReadFile(mainGemini)
+	rootGemini := filepath.Join(targetDir, "GEMINI.md")
+	geminiContent, err := os.ReadFile(rootGemini)
 	if err != nil || !strings.Contains(string(geminiContent), PureBareGuardMarker) {
-		t.Errorf("failed to read main/GEMINI.md or missing guard marker: %v", err)
+		t.Errorf("failed to read root GEMINI.md or missing guard marker: %v", err)
+	}
+
+	// Verify main/ worktree does NOT contain uncommitted GEMINI.md
+	mainGemini := filepath.Join(targetDir, "main", "GEMINI.md")
+	if _, err := os.Stat(mainGemini); !os.IsNotExist(err) {
+		t.Errorf("expected no GEMINI.md dumped inside main/ worktree, found one")
 	}
 
 	// Verify no dedicated worktrees/ container is created
@@ -295,6 +301,16 @@ func TestConvertStandardClone_Clean(t *testing.T) {
 	logOut := testutil.RunGit(t, mainDir, "log", "-1", "--format=%s")
 	if logOut != "Add main.go" {
 		t.Errorf("expected latest commit 'Add main.go', got '%s'", logOut)
+	}
+
+	// Verify root GEMINI.md exists
+	rootGemini := filepath.Join(cloneDir, "GEMINI.md")
+	if _, err := os.Stat(rootGemini); err != nil {
+		t.Errorf("expected root GEMINI.md to exist: %v", err)
+	}
+	// Verify main/ worktree does NOT contain GEMINI.md
+	if _, err := os.Stat(filepath.Join(mainDir, "GEMINI.md")); !os.IsNotExist(err) {
+		t.Errorf("expected main/ worktree to NOT contain GEMINI.md")
 	}
 
 	// Verify no dedicated worktrees/ container is created
@@ -455,6 +471,21 @@ func TestInitGreenfield(t *testing.T) {
 	wtDir := filepath.Join(emptyDir, "worktrees")
 	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
 		t.Errorf("expected no worktrees/ subdirectory in Pure Bare layout, got err=%v", err)
+	}
+
+	// Verify root GEMINI.md exists
+	rootGemini := filepath.Join(emptyDir, "GEMINI.md")
+	if _, err := os.Stat(rootGemini); err != nil {
+		t.Errorf("expected root GEMINI.md to exist: %v", err)
+	}
+	// Verify main/ worktree does NOT contain GEMINI.md
+	if _, err := os.Stat(filepath.Join(mainDir, "GEMINI.md")); !os.IsNotExist(err) {
+		t.Errorf("expected main/ worktree to NOT contain GEMINI.md")
+	}
+	// Verify main/ initial commit does NOT include GEMINI.md
+	logFiles := testutil.RunGit(t, mainDir, "log", "-1", "--name-only", "--pretty=format:")
+	if strings.Contains(logFiles, "GEMINI.md") {
+		t.Errorf("expected initial commit to NOT include GEMINI.md, got files:\n%s", logFiles)
 	}
 }
 
