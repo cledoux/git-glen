@@ -110,7 +110,7 @@ func TestHookPreToolUseAgy(t *testing.T) {
 		code, out, _ := runHookWith(t, args, map[string]any{
 			"workspacePaths": []string{root},
 			"toolCall": map[string]any{
-				"name": "code_action",
+				"name": "replace_file_content",
 				"args": map[string]any{"TargetFile": filepath.Join(root, "main", "a.go"), "Instruction": "x"},
 			},
 		})
@@ -139,6 +139,19 @@ func TestHookPreToolUseAgy(t *testing.T) {
 		}
 	})
 
+	t.Run("UnknownToolWithPathPasses", func(t *testing.T) {
+		_, out, _ := runHookWith(t, args, map[string]any{
+			"workspacePaths": []string{root},
+			"toolCall": map[string]any{
+				"name": "list_dir",
+				"args": map[string]any{"DirectoryPath": filepath.Join(root, "main")},
+			},
+		})
+		if out != "" {
+			t.Errorf("got %q, want empty", out)
+		}
+	})
+
 	t.Run("ReadOnlyToolPasses", func(t *testing.T) {
 		_, out, _ := runHookWith(t, args, map[string]any{
 			"workspacePaths": []string{root},
@@ -147,15 +160,15 @@ func TestHookPreToolUseAgy(t *testing.T) {
 				"args": map[string]any{"AbsolutePath": filepath.Join(root, "main", "a.go")},
 			},
 		})
-		if strings.TrimSpace(out) != "{}" {
-			t.Errorf("got %q, want {}", out)
+		if out != "" {
+			t.Errorf("got %q, want empty", out)
 		}
 	})
 
 	t.Run("FailsOpenOnGarbage", func(t *testing.T) {
 		code, out, _ := runHookWith(t, args, "not json")
-		if code != 0 || strings.TrimSpace(out) != "{}" {
-			t.Errorf("got code=%d stdout=%q, want 0 and {}", code, out)
+		if code != 0 || out != "" {
+			t.Errorf("got code=%d stdout=%q, want 0 and empty", code, out)
 		}
 	})
 }

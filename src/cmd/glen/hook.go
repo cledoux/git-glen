@@ -51,7 +51,7 @@ func runHook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	payload, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintf(stderr, "glen hook: reading stdin: %v\n", err)
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 	logPayload(positionals[0], agent, payload, stderr)
 
@@ -62,7 +62,7 @@ func runHook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return hookSessionStart(agent, contextFile, payload, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "glen hook: unknown event %q\n", positionals[0])
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 }
 
@@ -80,13 +80,11 @@ func logPayload(event, agent string, payload []byte, stderr io.Writer) {
 	fmt.Fprintf(f, "# %s %s\n%s\n", agent, event, strings.TrimSpace(string(payload)))
 }
 
-// passThrough expresses "no opinion". Claude Code treats empty output as such;
-// Antigravity requires a JSON object, and an unset decision defers to its
-// normal permission policy (an explicit "allow" would bypass it).
-func passThrough(agent string, stdout io.Writer) int {
-	if agent == agentAgy {
-		fmt.Fprintln(stdout, "{}")
-	}
+// passThrough expresses "no opinion" by writing nothing. Both agents then apply
+// their normal permission policy. Antigravity treats any JSON object without an
+// explicit "allow" (including {} and {"decision":""}) as a denial, and "allow"
+// would bypass its permission prompts, so empty output is the only neutral reply.
+func passThrough() int {
 	return 0
 }
 
@@ -101,12 +99,12 @@ func hookPreToolUse(agent string, payload []byte, stdout, stderr io.Writer) int 
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "glen hook: parsing %s payload: %v\n", agent, err)
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 
 	d := hook.Evaluate(action)
 	if !d.Deny {
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 
 	var resp any
@@ -122,27 +120,27 @@ func hookPreToolUse(agent string, payload []byte, stdout, stderr io.Writer) int 
 	case agentAgy:
 		resp = map[string]any{"decision": "deny", "reason": d.Reason}
 	}
-	return writeJSON(agent, resp, stdout, stderr)
+	return writeJSON(resp, stdout, stderr)
 }
 
 func hookSessionStart(agent, contextFile string, payload []byte, stdout, stderr io.Writer) int {
 	if agent != agentClaude || contextFile == "" {
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 	var in struct {
 		Cwd string `json:"cwd"`
 	}
 	if err := json.Unmarshal(payload, &in); err != nil {
 		fmt.Fprintf(stderr, "glen hook: parsing %s payload: %v\n", agent, err)
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 	if _, ok := hook.FindWorkspace(in.Cwd); !ok {
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 	data, err := os.ReadFile(contextFile)
 	if err != nil {
 		fmt.Fprintf(stderr, "glen hook: reading context file: %v\n", err)
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 	resp := map[string]any{
 		"hookSpecificOutput": map[string]any{
@@ -150,14 +148,14 @@ func hookSessionStart(agent, contextFile string, payload []byte, stdout, stderr 
 			"additionalContext": stripFrontmatter(string(data)),
 		},
 	}
-	return writeJSON(agent, resp, stdout, stderr)
+	return writeJSON(resp, stdout, stderr)
 }
 
-func writeJSON(agent string, v any, stdout, stderr io.Writer) int {
+func writeJSON(v any, stdout, stderr io.Writer) int {
 	out, err := json.Marshal(v)
 	if err != nil {
 		fmt.Fprintf(stderr, "glen hook: encoding response: %v\n", err)
-		return passThrough(agent, stdout)
+		return passThrough()
 	}
 	fmt.Fprintln(stdout, string(out))
 	return 0
@@ -206,9 +204,12 @@ func parseClaudeToolCall(payload []byte) (hook.Action, error) {
 	return a, nil
 }
 
-// parseAgyToolCall reads Antigravity's PreToolUse payload. Antigravity does not
-// document per-tool argument names, so file targets are taken from any string
-// argument whose key mentions a file or path; run_command carries CommandLine.
+// parseAgyToolCall reads Antigravity's PreToolUse payload. Observed in agy
+// 2026-10: write_to_file and replace_file_content carry the target in
+// TargetFile; run_command carries CommandLine and Cwd. Other file-mutating tool
+// names found in the agy binary are guarded by any string argument whose key
+// mentions a file or path. Every other tool passes, so reads never trip the
+// edit guard.
 func parseAgyToolCall(payload []byte) (hook.Action, error) {
 	var in struct {
 		WorkspacePaths []string `json:"workspacePaths"`
@@ -231,9 +232,8 @@ func parseAgyToolCall(payload []byte) (hook.Action, error) {
 	switch in.ToolCall.Name {
 	case "run_command":
 		a.Command, _ = in.ToolCall.Args["CommandLine"].(string)
-	case "view_file", "view_file_outline", "view_code_item", "grep_search", "code_search", "list_dir", "find_by_name":
-		// Read-only tools never need the edit guard.
-	default:
+	case "write_to_file", "replace_file_content", "multi_replace_file_content",
+		"create_file", "edit_file", "delete_file", "edit_notebook":
 		for k, v := range in.ToolCall.Args {
 			key := strings.ToLower(k)
 			if key == "cwd" || !(strings.Contains(key, "file") || strings.Contains(key, "path")) {

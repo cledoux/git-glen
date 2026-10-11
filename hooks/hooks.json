@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "glen hook session-start --agent=claude --context-file \"${CLAUDE_PLUGIN_ROOT}/rules/pure-bare-worktrees.md\"",
+            "command": "command -v glen >/dev/null 2>&1 && glen hook session-start --agent=claude --context-file \"${CLAUDE_PLUGIN_ROOT}/rules/pure-bare-worktrees.md\" || true",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "glen hook pre-tool-use --agent=claude",
+            "command": "command -v glen >/dev/null 2>&1 && glen hook pre-tool-use --agent=claude || true",
             "timeout": 10
           }
         ]

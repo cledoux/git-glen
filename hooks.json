@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "glen hook pre-tool-use --agent=agy",
+            "command": "command -v glen >/dev/null 2>&1 && glen hook pre-tool-use --agent=agy || true",
             "timeout": 10
           }
         ]

@@ -71,5 +71,18 @@ once the plugin is installed.
 ## Debugging Hooks
 
 Set `GLEN_HOOK_LOG=/path/to/file` in the agent's environment to append every
-raw hook payload to that file. Use it to confirm Antigravity's tool argument
-names, which are undocumented.
+raw hook payload to that file.
+
+Antigravity hook behavior (verified against agy, 2026-10):
+
+- Any JSON reply without an explicit `"allow"` (including `{}` and
+  `{"decision":""}`) **denies** the tool call. Empty stdout is the only
+  neutral reply, and it leaves normal permission prompts intact.
+- A hook command that exits non-zero (e.g. `glen` not on PATH) **denies every
+  tool call**. Hook commands are therefore wrapped in
+  `command -v glen ... && glen hook ... || true`; keep that wrapper.
+- Edit tools are `write_to_file` and `replace_file_content` with the path in
+  `TargetFile`; `run_command` carries `CommandLine` and `Cwd`.
+- To test the plugin without installing it globally, declare it in a scratch
+  workspace's `.agents/plugins.json`:
+  `{"entries":[{"path":"/path/to/worktree"}]}`.
