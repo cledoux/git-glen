@@ -3,6 +3,13 @@
 BINARY_DIR ?= bin
 INSTALL_BIN_DIR ?= $(HOME)/.local/bin
 AGY_PLUGIN_DIR ?= $(HOME)/.gemini/config/plugins/glen
+CLAUDE_PLUGIN_DIR ?= $(HOME)/.claude/skills/glen
+# "auto" installs the plugin for each of claude / agy found on PATH.
+AGENTS ?= auto
+# Set YES=1 to skip the prompt when installing from a non-default worktree.
+YES ?=
+
+export BINARY_DIR INSTALL_BIN_DIR AGY_PLUGIN_DIR CLAUDE_PLUGIN_DIR AGENTS YES
 
 build:
 	@mkdir -p $(BINARY_DIR)
@@ -13,19 +20,11 @@ test:
 	timeout 60s go -C src test -v ./...
 
 install: build
-	@mkdir -p $(INSTALL_BIN_DIR)
-	ln -sfn $(abspath $(BINARY_DIR)/glen) $(INSTALL_BIN_DIR)/glen
-	ln -sfn $(abspath $(BINARY_DIR)/git-glen) $(INSTALL_BIN_DIR)/git-glen
-	@mkdir -p $(AGY_PLUGIN_DIR)
-	ln -sfn $(abspath plugin.json) $(AGY_PLUGIN_DIR)/plugin.json
-	ln -sfn $(abspath README.md) $(AGY_PLUGIN_DIR)/README.md
-	ln -sfn $(abspath assets) $(AGY_PLUGIN_DIR)/assets
-	ln -sfn $(abspath rules) $(AGY_PLUGIN_DIR)/rules
-	ln -sfn $(abspath skills) $(AGY_PLUGIN_DIR)/skills
+	@scripts/install.sh
 
 uninstall:
 	rm -f $(INSTALL_BIN_DIR)/glen $(INSTALL_BIN_DIR)/git-glen
-	rm -rf $(AGY_PLUGIN_DIR)
+	rm -rf $(AGY_PLUGIN_DIR) $(CLAUDE_PLUGIN_DIR)
 
 clean:
 	rm -rf $(BINARY_DIR)
