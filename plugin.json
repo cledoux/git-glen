@@ -6,7 +6,6 @@
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
     "Set up this repository for a Git worktree workflow",
-    "Create an isolated feature worktree for my current task",
     "Commit my changes and open a pull request",
     "Submit the current pull request and clean up the worktree"
   ]
