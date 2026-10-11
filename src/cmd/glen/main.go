@@ -51,6 +51,8 @@ func RunGlenCommand(ctx context.Context, args []string, stdout, stderr io.Writer
 		return runPrune(ctx, subArgs, stdout, stderr)
 	case "repair":
 		return runInit(ctx, subArgs, stdout, stderr)
+	case "hook":
+		return runHook(subArgs, os.Stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "Unknown glen subcommand: %s\n\n", subcommand)
 		printGlenUsage(stderr)
@@ -68,7 +70,8 @@ func printGlenUsage(w io.Writer) {
 	fmt.Fprintf(w, "  create <branch-or-slug> [base]    Create an isolated worktree at <root>/<branch-name>\n")
 	fmt.Fprintf(w, "  remove <branch-or-slug>           Remove a feature worktree, prune locks, and delete its local branch\n")
 	fmt.Fprintf(w, "  prune                             Prune stale worktree metadata and locks (--expire now)\n")
-	fmt.Fprintf(w, "  repair [target]                   Repair worktree pointers, root .git pointer, and bare config\n\n")
+	fmt.Fprintf(w, "  repair [target]                   Repair worktree pointers, root .git pointer, and bare config\n")
+	fmt.Fprintf(w, "  hook <event> --agent=<agent>      Agent lifecycle hook adapter (Claude Code, Antigravity)\n\n")
 	fmt.Fprintf(w, "Common Options:\n")
 	fmt.Fprintf(w, "  -C <dir>                          Change effective directory before resolving workspace\n")
 	fmt.Fprintf(w, "  -h, --help                        Show this help message\n")
