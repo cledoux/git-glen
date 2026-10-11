@@ -137,9 +137,9 @@ ______________________________________________________________________
 
 ### Problem: `fatal: reftable: transaction prepare: I/O error` or `Read-only file system` on `config.worktree`
 
-- **Cause**: The Antigravity terminal sandbox mounts `.git` / `.bare`
+- **Cause**: A terminal sandbox (e.g. Antigravity's) mounts `.git` / `.bare`
   directories read-only and blocks `reftable` lock transactions.
-- **Fix**: Re-run the state-changing `git` command with `BypassSandbox: true`.
+- **Fix**: Re-run the state-changing `git` command with sandbox escalation.
 
 ### Problem: `gh pr merge --delete-branch` fails with `fatal: 'main' is already used by worktree`
 
@@ -159,7 +159,7 @@ ______________________________________________________________________
 
 - **Cause**: Linked worktrees use relative or absolute `.git` pointer files that
   break if the parent directory is relocated.
-- **Fix**: Run worktree repair (`BypassSandbox: true`):
+- **Fix**: Run worktree repair:
   ```bash
   glen repair <root>
   ```
@@ -169,7 +169,7 @@ ______________________________________________________________________
 - **Cause**: A worktree directory was deleted via `rm -rf` or an agent process
   crashed mid-operation, leaving stale administrative entries under
   `.bare/worktrees/<slug>`.
-- **Fix**: Prune expired worktree metadata immediately (`BypassSandbox: true`):
+- **Fix**: Prune expired worktree metadata immediately:
   ```bash
   git --git-dir=<root>/.bare worktree prune --expire now
   ```

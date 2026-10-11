@@ -36,7 +36,7 @@ ______________________________________________________________________
 
 1. Discover repository topology and VCS markers (`.bare` + `.git` + `main` Pure
    Bare topology, standard `.git` clone, `.jj`, or `.hg`).
-1. Identify the active branch in the target worktree (`BypassSandbox: false`):
+1. Identify the active branch in the target worktree:
    ```bash
    git -C <worktree-path> branch --show-current
    ```
@@ -65,7 +65,7 @@ Before initiating merge:
    - If changes are requested or required approvals are missing, warn the user
      and request confirmation.
 1. **Working Tree Cleanliness**:
-   - Run `git -C <worktree-path> status -uall` (`BypassSandbox: false`).
+   - Run `git -C <worktree-path> status -uall`.
    - Ensure the working tree is clean with no uncommitted or untracked changes.
    - If uncommitted changes exist, **STOP** and ask the user how to handle them.
 
@@ -109,7 +109,7 @@ ______________________________________________________________________
 ### Step 4: Upstream Synchronization & Local Worktree / Branch Cleanup
 
 1. **If operating in a Pure Bare worktree topology (`<root>/.bare` +
-   `<root>/main` + `<root>/<branch-name>`)** (`BypassSandbox: true`):
+   `<root>/main` + `<root>/<branch-name>`)**:
    - Synchronize the primary `<root>/main` worktree with upstream:
      ```bash
      git -C <root>/main pull --ff-only origin main
@@ -124,7 +124,7 @@ ______________________________________________________________________
      git --git-dir=<root>/.bare branch -D "<branch-name>"
      git --git-dir=<root>/.bare fetch --prune origin
      ```
-1. **If operating in a standard single-worktree clone** (`BypassSandbox: true`):
+1. **If operating in a standard single-worktree clone**:
    - Switch to default branch: `git checkout main`
    - Pull latest upstream commits: `git pull --ff-only origin main`
    - Delete local feature branch: `git branch -D "<branch-name>"`
@@ -134,7 +134,7 @@ ______________________________________________________________________
 
 ### Step 5: Final Verification & Summary
 
-1. Verify clean repository and worktree status (`BypassSandbox: false`):
+1. Verify clean repository and worktree status:
    - `git -C <root>/main status`
    - `git -C <root>/main log -n 3 --oneline`
    - `git --git-dir=<root>/.bare worktree list`

@@ -19,8 +19,7 @@ ______________________________________________________________________
 
 1. Discover repository topology and VCS markers (`.bare` + `.git` + `main` Pure
    Bare worktree topology, standard `.git` clone, `.jj`, or `.hg`).
-1. Run detailed working tree status checks inside the target worktree
-   (`BypassSandbox: false`):
+1. Run detailed working tree status checks inside the target worktree:
    - Git worktree: `git -C <worktree-path> status -uall` and
      `git -C <worktree-path> diff --stat`
    - Jujutsu: `jj status` and `jj diff --stat`
@@ -84,10 +83,9 @@ For each planned PR:
 
    - **Pure Bare Topology (`<root>/.bare` + `<root>/<branch-name>`)**: Ensure
      changes reside in an isolated feature worktree at `<root>/<branch-name>`
-     (using the **`worktree`** skill or `glen create <branch-name> -C <root>`
-     with `BypassSandbox: true`).
+     (using the **`worktree`** skill or `glen create <branch-name> -C <root>`).
    - **Standard Clone**: Branch off the appropriate base
-     (`git checkout -b <branch-name> [base-branch]` with `BypassSandbox: true`).
+     (`git checkout -b <branch-name> [base-branch]`).
    - Use clear, descriptive branch names (e.g., `feat/<name>`, `fix/<name>`,
      `refactor/<name>`, `docs/<name>`).
 
@@ -119,9 +117,8 @@ For each planned PR:
 
 1. **Stage & Commit**:
 
-   - Stage target files (`git -C <worktree-path> add path/to/files` with
-     `BypassSandbox: true`).
-   - Execute the commit with the structured message (`BypassSandbox: true`).
+   - Stage target files (`git -C <worktree-path> add path/to/files`).
+   - Execute the commit with the structured message.
    - Repeat for each atomic commit on the branch.
 
 ______________________________________________________________________
@@ -130,7 +127,7 @@ ______________________________________________________________________
 
 1. **Push Branch to Remote**:
 
-   - Push the feature branch to upstream (`BypassSandbox: true`):
+   - Push the feature branch to upstream:
      ```bash
      git -C <worktree-path> push -u origin <branch-name>
      ```
@@ -185,7 +182,7 @@ ______________________________________________________________________
 
 ### Step 7: Final Verification & Next Steps
 
-1. Verify the local working copy and branches (`BypassSandbox: false`):
+1. Verify the local working copy and branches:
    - `git -C <worktree-path> status` (confirm working tree is clean)
    - `git -C <worktree-path> log -n <count> --oneline`
 1. Present a concise summary to the user:

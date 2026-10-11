@@ -32,8 +32,9 @@ ______________________________________________________________________
 ## Fast-Path Execution (`glen init`)
 
 Run `glen init` (or `git glen init`) to execute the repository-level
-initialization, conversion, migration, or repair logic. Because initialization
-mutates `.bare/` and worktree metadata, always run with `BypassSandbox: true`:
+initialization, conversion, migration, or repair logic. Initialization mutates
+`.bare/` and worktree metadata, so in a sandboxed terminal run it with sandbox
+escalation:
 
 ```bash
 # Scenario A: Clone a remote repository into Pure Bare topology
@@ -155,8 +156,7 @@ ______________________________________________________________________
 
 ## Verification Steps
 
-After running initialization or conversion, verify the workspace
-(`BypassSandbox: false`):
+After running initialization or conversion, verify the workspace:
 
 1. `cat <target-dir>/.git` returns `gitdir: ./.bare`.
 1. `git --git-dir=<target-dir>/.bare config --get-all remote.origin.fetch`

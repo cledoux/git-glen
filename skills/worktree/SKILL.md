@@ -41,34 +41,33 @@ ______________________________________________________________________
   - `feat/finding-ingestion` -> `<root>/feat/finding-ingestion`
   - `feat/101-sqlite-state` -> `<root>/feat/101-sqlite-state`
   - `fix/sigterm-handling` -> `<root>/fix/sigterm-handling`
-- **Antigravity Sandbox Rule**: State-changing Git commands (`git worktree add`,
+- **Sandboxed Terminals**: State-changing Git commands (`git worktree add`,
   `git worktree remove`, `git worktree prune`, `git config --worktree`,
   `git commit`, `git branch`, `git fetch`, `git push`) write to `.bare/` and
-  MUST be executed with `BypassSandbox: true`. Read-only commands (`git status`,
-  `git diff`, `git log`, `git worktree list`) run in standard sandbox mode
-  (`BypassSandbox: false`).
+  fail in terminal sandboxes that mount `.bare/` read-only; re-run them with
+  sandbox escalation. Read-only commands (`git status`, `git diff`, `git log`,
+  `git worktree list`) never need it.
 
 ______________________________________________________________________
 
 ## Fast-Path CLI Commands (`glen` / `git glen`)
 
-Use `glen` (or `git glen`) to manage worktrees deterministically (run with
-`BypassSandbox: true` for mutating subcommands):
+Use `glen` (or `git glen`) to manage worktrees deterministically:
 
 ```bash
-# Initialize, convert, migrate, or repair a repository into Pure Bare topology (BypassSandbox: true)
+# Initialize, convert, migrate, or repair a repository into Pure Bare topology
 glen init [target-dir-or-url] [-C <dir>]
 
-# List active worktrees and topology paths (sandboxed OK; supports --json)
+# List active worktrees and topology paths (read-only; supports --json)
 glen list [-C <workspace-path>] [--json]
 
-# Create an isolated feature worktree at <root>/<branch-name> (BypassSandbox: true)
+# Create an isolated feature worktree at <root>/<branch-name>
 glen create <branch-or-slug> [base-ref] [--issue <id>] [--name "Agent" --email "user+agent@example.com"] [-C <workspace-path>]
 
-# Tear down a merged worktree, clean up empty parent folders, prune locks, and delete its local branch (BypassSandbox: true)
+# Tear down a merged worktree, clean up empty parent folders, prune locks, and delete its local branch
 glen remove <branch-or-slug> [-C <workspace-path>]
 
-# Prune stale worktree metadata and locks (BypassSandbox: true)
+# Prune stale worktree metadata and locks
 glen prune [-C <workspace-path>]
 ```
 
@@ -79,7 +78,7 @@ ______________________________________________________________________
 ### 1. Discover Workspace Root & Inspect Active Worktrees
 
 Resolve `<root>` by locating the directory containing `.bare/`, then list active
-worktrees (`BypassSandbox: false`):
+worktrees:
 
 ```bash
 git --git-dir=<root>/.bare worktree list
@@ -89,7 +88,7 @@ git --git-dir=<root>/.bare worktree list
 
 Ensure `<root>/.git` points to `./.bare`, `.bare` has the wildcard fetch refspec
 and ergonomic defaults configured, and fetch the latest default branch from
-`origin` (or `upstream`) (`BypassSandbox: true`):
+`origin` (or `upstream`):
 
 ```bash
 echo "gitdir: ./.bare" > <root>/.git
@@ -110,27 +109,24 @@ git --git-dir=<root>/.bare fetch origin
    - General feature: `feat/<task-slug>` (e.g. `feat/worktree-plugin`)
    - Bug fix: `fix/<issue-slug>` (e.g. `fix/sigterm-handling`)
    - Docs / Refactor: `docs/<slug>`, `refactor/<slug>`
-1. Provision the worktree at `<root>/<branch-name>` from `.bare`
-   (`BypassSandbox: true`):
+1. Provision the worktree at `<root>/<branch-name>` from `.bare`:
    ```bash
    git --git-dir=<root>/.bare worktree add \
        <root>/<branch-name> \
        -b <branch-name> origin/main
    ```
-1. Set `core.bare = false` in the worktree's isolated config
-   (`BypassSandbox: true`):
+1. Set `core.bare = false` in the worktree's isolated config:
    ```bash
    git -C <root>/<branch-name> config --worktree core.bare false
    ```
 1. *(Optional)* If operating under a specific agent persona, isolate Git author
-   identity (`BypassSandbox: true`):
+   identity:
    ```bash
    git -C <root>/<branch-name> config --worktree user.name "<Agent Name>"
    git -C <root>/<branch-name> config --worktree user.email "<user+agent@example.com>"
    ```
-1. **Validation**: Run `git -C <root>/<branch-name> status`
-   (`BypassSandbox: false`) and confirm it reports `On branch <branch-name>`
-   with a clean working tree.
+1. **Validation**: Run `git -C <root>/<branch-name> status` and confirm it
+   reports `On branch <branch-name>` with a clean working tree.
 
 ### 4. Work Strictly Inside the Worktree
 
@@ -147,7 +143,7 @@ git --git-dir=<root>/.bare fetch origin
 1. Use the bundled **`commit`** skill (`../commit/SKILL.md`) (or **`shipit`**
    skill `../shipit/SKILL.md` for lightweight fast-path changes) to create
    atomic commits recording both the **Why** and the **What**.
-1. Push the branch (`BypassSandbox: true`):
+1. Push the branch:
    ```bash
    git -C <root>/<branch-name> push -u origin <branch-name>
    ```
@@ -166,13 +162,12 @@ and ready to merge, use the bundled **`submit`** skill (`../submit/SKILL.md`):
    ```bash
    gh pr merge <pr-number> --squash
    ```
-1. Synchronize `<root>/main/` with the merged upstream changes
-   (`BypassSandbox: true`):
+1. Synchronize `<root>/main/` with the merged upstream changes:
    ```bash
    git -C <root>/main pull --ff-only origin main
    ```
 1. Remove the merged feature worktree, prune stale metadata, and delete the
-   local branch (`BypassSandbox: true`):
+   local branch:
    ```bash
    glen remove <branch-name> -C <root>
    # or manually:
@@ -181,6 +176,6 @@ and ready to merge, use the bundled **`submit`** skill (`../submit/SKILL.md`):
    git --git-dir=<root>/.bare branch -D <branch-name>
    git --git-dir=<root>/.bare fetch --prune origin
    ```
-1. **Validation**: Run `git --git-dir=<root>/.bare worktree list`
-   (`BypassSandbox: false`) and verify that `<root>/<branch-name>` is removed
-   and `<root>/main` is at the latest merged commit.
+1. **Validation**: Run `git --git-dir=<root>/.bare worktree list` and verify
+   that `<root>/<branch-name>` is removed and `<root>/main` is at the latest
+   merged commit.

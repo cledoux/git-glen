@@ -20,7 +20,7 @@ ______________________________________________________________________
 
 1. Discover repository topology and VCS markers (`.bare` + `.git` + `main` Pure
    Bare topology, standard `.git` clone, `.jj`, or `.hg`).
-1. Run working tree status checks (`BypassSandbox: false`):
+1. Run working tree status checks:
    - `git -C <worktree-path> status -uall` and
      `git -C <worktree-path> diff --stat`
 1. Identify all modified, untracked, and deleted files.
@@ -74,8 +74,9 @@ ______________________________________________________________________
 
 ### Step 5: Fast-Path Merge & Direct Push
 
-All state-changing Git commands (`add`, `commit`, `pull`, `merge`, `push`,
-`worktree remove`, `branch -d`) MUST run with `BypassSandbox: true`:
+State-changing Git commands (`add`, `commit`, `pull`, `merge`, `push`,
+`worktree remove`, `branch -d`) write to `.bare/`; if a terminal sandbox
+rejects them, re-run with sandbox escalation:
 
 1. **If on `main` (`<root>/main` or standard clone)**:
    - Stage target files: `git -C <main-path> add ...`
@@ -106,7 +107,7 @@ ______________________________________________________________________
 
 ### Step 6: Verification
 
-1. Verify final log and clean tree (`BypassSandbox: false`):
+1. Verify final log and clean tree:
    - `git -C <main-path> log -n 1 --oneline`
    - `git -C <main-path> status`
 1. Confirm to the user that the change has been shipped and pushed to upstream.
