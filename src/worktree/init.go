@@ -22,12 +22,6 @@ const (
 	ScenarioGreenfield    Scenario = "greenfield"
 )
 
-// PureBareGuardMarker identifies the automated Glen guardrail block.
-const PureBareGuardMarker = "<!-- glen:pure-bare-guard -->"
-
-// PureBareGuardSnippet defines the lightweight tripwire injected into workspace rules.
-const PureBareGuardSnippet = "<!-- glen:pure-bare-guard -->\n## Pure Bare Worktree Discipline\nThis repository uses the Pure Bare topology (`.bare/` + `main/` + `<branch>/`).\n- NEVER edit feature or bugfix code directly in `main/`.\n- NEVER run working-tree Git commands at the workspace root.\n- ALWAYS use `glen create <branch-name>` or the `worktree` skill before modifying code.\n"
-
 // InitResult contains execution summary metadata from repository initialization.
 type InitResult struct {
 	Scenario      Scenario
@@ -323,8 +317,6 @@ func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "branch", "--set-upstream-to=origin/"+branch, branch)
 	_ = cmd.Run()
 
-	_ = EnsureWorkspaceGuard(mainDir)
-
 	return &InitResult{
 		Scenario:      ScenarioRemoteClone,
 		BaseDir:       absTarget,
@@ -413,8 +405,6 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false")
 	_ = cmd.Run()
 
-	_ = EnsureWorkspaceGuard(mainDir)
-
 	return &InitResult{
 		Scenario:      ScenarioCloneConvert,
 		BaseDir:       absClone,
@@ -473,8 +463,6 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 	if branch == "" {
 		branch = "main"
 	}
-
-	_ = EnsureWorkspaceGuard(mainDir)
 
 	return &InitResult{
 		Scenario:      ScenarioBareRepair,
@@ -564,8 +552,6 @@ func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*In
 	// 9. Remove empty legacy worktrees container if unused
 	_ = os.Remove(filepath.Join(absRoot, "worktrees"))
 
-	_ = EnsureWorkspaceGuard(mainDir)
-
 	return &InitResult{
 		Scenario:      ScenarioLegacyMigrate,
 		BaseDir:       absRoot,
@@ -625,7 +611,6 @@ func (m *Manager) InitGreenfield(ctx context.Context, targetDir string) (*InitRe
 	// 4. Initial commit in main
 	readmePath := filepath.Join(mainDir, "README.md")
 	_ = os.WriteFile(readmePath, []byte("# Project\n\nInitialized with `glen init`.\n"), 0644)
-	_ = EnsureWorkspaceGuard(mainDir)
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "add", "-A")
 	_ = cmd.Run()
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "commit", "-m", "Initial commit")
@@ -638,41 +623,4 @@ func (m *Manager) InitGreenfield(ctx context.Context, targetDir string) (*InitRe
 		MainDir:       mainDir,
 		DefaultBranch: "main",
 	}, nil
-}
-
-// EnsureWorkspaceGuard ensures that mainDir contains a local GEMINI.md (or AGENTS.md)
-// with the Pure Bare guardrail tripwire.
-func EnsureWorkspaceGuard(mainDir string) error {
-	if mainDir == "" {
-		return nil
-	}
-	if info, err := os.Stat(mainDir); err != nil || !info.IsDir() {
-		return nil
-	}
-
-	geminiPath := filepath.Join(mainDir, "GEMINI.md")
-	agentsPath := filepath.Join(mainDir, "AGENTS.md")
-
-	targetPath := geminiPath
-	if _, err := os.Stat(geminiPath); os.IsNotExist(err) {
-		if _, err := os.Stat(agentsPath); err == nil {
-			targetPath = agentsPath
-		}
-	}
-
-	content, err := os.ReadFile(targetPath)
-	if err == nil {
-		if strings.Contains(string(content), PureBareGuardMarker) {
-			return nil
-		}
-		newContent := strings.TrimRight(string(content), "\n") + "\n\n" + PureBareGuardSnippet
-		return os.WriteFile(targetPath, []byte(newContent), 0644)
-	}
-
-	if os.IsNotExist(err) {
-		initialContent := "# Project Guidelines\n\n" + PureBareGuardSnippet
-		return os.WriteFile(geminiPath, []byte(initialContent), 0644)
-	}
-
-	return err
 }
