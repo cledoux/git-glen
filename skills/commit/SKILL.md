@@ -2,7 +2,10 @@
 name: commit
 description: >-
   Execute branch-based atomic commit workflow and open or update pull requests
-  for review.
+  for review. Accepts an optional mode: `draft` (push and open a draft PR) or
+  `local` (commit only, no push); a later plain invocation promotes earlier
+  draft/local work to a ready-for-review PR.
+argument-hint: "[draft|local] [scope or context]"
 ---
 
 # Commit & Review Preparation Workflow
@@ -10,6 +13,33 @@ description: >-
 Inspect the working copy, partition changes into one or more logical review
 units, construct structured atomic commits on dedicated feature branches or
 isolated worktrees, push to remote, and open pull requests for code review.
+
+______________________________________________________________________
+
+## Modes
+
+The first argument, if it is `draft` or `local`, selects the mode. Any
+remaining arguments scope which changes to commit or add context on intent;
+with none, consider the whole working tree.
+
+| Mode              | Commits | Push | Pull request                      |
+| :---------------- | :------ | :--- | :-------------------------------- |
+| *(default)*       | yes     | yes  | open (ready for review) or update |
+| `draft`           | yes     | yes  | open as draft (`--draft`)         |
+| `local`           | yes     | no   | none                              |
+
+**Promotion**: a plain (default-mode) invocation always finishes the branch's
+journey to a ready-for-review PR, even with nothing new to commit:
+
+- Branch has unpushed commits (from an earlier `local` run) -> push it.
+- No PR exists for the branch -> open one.
+- A draft PR exists (from an earlier `draft` run) -> push any new commits and
+  mark it ready with `gh pr ready <pr>`.
+
+Detect this state in Step 1 with `git -C <worktree-path> status -sb` (ahead
+count / missing upstream) and `gh pr view --json number,isDraft,url` from the
+worktree. A `draft` invocation on a branch that already has a ready PR does not
+convert it back to draft.
 
 ______________________________________________________________________
 
@@ -25,6 +55,13 @@ ______________________________________________________________________
    - Jujutsu: `jj status` and `jj diff --stat`
    - Mercurial: `hg status`
 1. Identify all untracked, modified, and deleted files.
+1. Sample recent history (`git -C <worktree-path> log --oneline -10`, plus a
+   full message or two) to learn the repository's commit conventions: voice,
+   subject length, body usage, issue references, and trailers such as
+   `Co-Authored-By`.
+1. Determine the branch's promotion state (upstream, ahead count, existing PR
+   and its draft status) as described in **Modes**. If the working tree is
+   clean, skip to the step that the mode and promotion state still require.
 
 ______________________________________________________________________
 
@@ -56,6 +93,10 @@ checks:
      `feat/part-1`) and configure the PR base target accordingly.
    - For non-trivial multi-PR splits, confirm the branch names, scope division,
      and dependency plan with the user before proceeding.
+   - If the split or the intent is genuinely ambiguous (two plausible
+     groupings, or a *why* that the diff and conversation do not reveal), ask
+     briefly rather than guessing. A wrong atomic split is harder to untangle
+     afterwards than a short question now.
 
 ______________________________________________________________________
 
@@ -71,7 +112,9 @@ Ensure standard project hygiene and verification checks pass:
      (e.g., `timeout 60s make test`) and verify that all tests pass.
 1. **Repository & Security Hygiene**:
    - Ensure temporary scratch files, build artifacts, test dumps, or sensitive
-     credentials are not accidentally staged.
+     credentials are not accidentally staged. Inspect staged content for
+     anything that looks like a secret, even when the filename looks
+     innocuous, and flag it to the user instead of committing it.
 
 ______________________________________________________________________
 
@@ -101,7 +144,16 @@ For each planned PR:
 
 1. **Commit Message Format**:
 
-   - Every commit message MUST clearly record both the **Why** and the **What**:
+   - Every commit message MUST clearly record both the **Why** and the **What**.
+     The subject line is the what; the body carries the reasoning the diff
+     cannot show: key decisions, rejected alternatives, and non-obvious
+     constraints. Summarize what changed, but do not restate the diff line by
+     line.
+   - Match the repository's conventions sampled in Step 1 (style, issue
+     references, trailers) rather than imposing an external style.
+   - Keep bodies about this change. General workflow lessons or operational
+     notes belong in the project's agent instructions file (`AGENTS.md`,
+     `CLAUDE.md`, or `GEMINI.md`), not in commit messages.
 
    ```text
    <Concise one-line summary describing the logical change>
@@ -117,9 +169,22 @@ For each planned PR:
 
 1. **Stage & Commit**:
 
-   - Stage target files (`git -C <worktree-path> add path/to/files`).
+   - Stage target files explicitly per commit
+     (`git -C <worktree-path> add path/to/files`). Never use a blanket
+     `git add -A` / `git add .`, which sweeps unrelated in-progress edits into
+     the wrong commit.
    - Execute the commit with the structured message.
    - Repeat for each atomic commit on the branch.
+
+1. **Commit Safety**:
+
+   - Never bypass hooks or signing (`--no-verify`, `--no-gpg-sign`,
+     `-c commit.gpgsign=false`). If a hook fails, fix the cause and create a
+     new commit.
+   - Never amend an existing commit unless the user explicitly asks.
+
+1. **`local` mode**: skip Step 5 and the PR parts of Step 6; still build each
+   planned branch's commits, then go to Step 7.
 
 ______________________________________________________________________
 
@@ -132,8 +197,13 @@ ______________________________________________________________________
      git -C <worktree-path> push -u origin <branch-name>
      ```
 
-1. **Create Pull Request via CLI (`gh pr create`)**:
+1. **Create or Update the Pull Request via CLI**:
 
+   - If a PR already exists for the branch, the push updates it. In default
+     mode, if it is a draft, mark it ready: `gh pr ready <pr>`. Then skip to
+     Step 6.
+   - Otherwise create one with `gh pr create`, adding `--draft` in `draft`
+     mode.
    - Prefer command-line tools over web UIs.
    - Ensure the repository has `delete_branch_on_merge` enabled:
      ```bash
@@ -186,6 +256,9 @@ ______________________________________________________________________
    - `git -C <worktree-path> status` (confirm working tree is clean)
    - `git -C <worktree-path> log -n <count> --oneline`
 1. Present a concise summary to the user:
+   - Mode used, and whether the PR is draft or ready (or that commits are
+     local only, with a reminder that a plain `commit` invocation will push
+     and open the PR)
    - Pull Request link(s) / URL(s)
    - Branch name(s), worktree path(s), and base target(s)
    - Linked issues / tracking IDs
