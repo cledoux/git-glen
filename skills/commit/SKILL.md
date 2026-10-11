@@ -57,8 +57,7 @@ ______________________________________________________________________
 1. Identify all untracked, modified, and deleted files.
 1. Sample recent history (`git -C <worktree-path> log --oneline -10`, plus a
    full message or two) to learn the repository's commit conventions: voice,
-   subject length, body usage, issue references, and trailers such as
-   `Co-Authored-By`.
+   subject length, body usage, and issue references.
 1. Determine the branch's promotion state (upstream, ahead count, existing PR
    and its draft status) as described in **Modes**. If the working tree is
    clean, skip to the step that the mode and promotion state still require.
@@ -150,7 +149,7 @@ For each planned PR:
      constraints. Summarize what changed, but do not restate the diff line by
      line.
    - Match the repository's conventions sampled in Step 1 (style, issue
-     references, trailers) rather than imposing an external style.
+     references) rather than imposing an external style.
    - Keep bodies about this change. General workflow lessons or operational
      notes belong in the project's agent instructions file (`AGENTS.md`,
      `CLAUDE.md`, or `GEMINI.md`), not in commit messages.
