@@ -1,0 +1,10 @@
+{
+  "name": "glen",
+  "version": "0.1.0",
+  "description": "Guided Git workflows for branch isolation, atomic commits, pull requests, and merges.",
+  "author": {
+    "name": "Charles LeDoux"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["git", "worktree", "pure-bare", "pull-request", "commit"]
+}

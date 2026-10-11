@@ -1,0 +1,28 @@
+{
+  "description": "Pure Bare guardrails: block edits in the default-branch worktree and `gh pr merge --delete-branch`; inject workflow context in Pure Bare workspaces. Requires `glen` on PATH; fails open without it.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "glen hook session-start --agent=claude --context-file \"${CLAUDE_PLUGIN_ROOT}/rules/pure-bare-worktrees.md\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "glen hook pre-tool-use --agent=claude",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

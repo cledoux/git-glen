@@ -1,0 +1,16 @@
+{
+  "glen-pure-bare-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "glen hook pre-tool-use --agent=agy",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
