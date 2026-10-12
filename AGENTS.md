@@ -12,8 +12,7 @@ that agent's own file.
 
 ```text
 git-glen/
-├── Makefile                    # Build, test, and install (delegates to scripts/install.sh)
-├── scripts/install.sh          # Detects claude/agy and symlinks the CLI + plugin into each
+├── Justfile                    # Build, test, and install recipes (CLI + Claude/Antigravity plugins)
 ├── plugin.json                 # Antigravity plugin manifest
 ├── hooks.json                  # Antigravity hooks (PreToolUse -> glen hook)
 ├── .claude-plugin/plugin.json  # Claude Code plugin manifest
@@ -33,17 +32,19 @@ git-glen/
 ## Development & Testing Commands
 
 ```bash
-make build      # Compile bin/glen and bin/git-glen from src/
-make test       # Run all tests (timeout 60s go -C src test -v ./...)
-make install    # Build, then link the CLI and the plugin into each agent on PATH
-make uninstall  # Remove installed symlinks and plugin directories
-make clean      # Clean build artifacts
+just build           # Compile bin/glen and bin/git-glen from src/
+just test            # Run all tests (timeout 60s go -C src test -v ./...)
+just install         # Build, then link the CLI and plugins for any detected agent directories (~/.claude, ~/.gemini)
+just install-claude  # Symlink the Claude Code plugin into CLAUDE_PLUGIN_DIR
+just install-agy     # Symlink the Antigravity plugin into AGY_PLUGIN_DIR
+just uninstall       # Remove installed symlinks and plugin directories
+just clean           # Clean build artifacts
 ```
 
-`make install` links from the worktree it runs in. From a feature worktree it
-warns and asks first (`YES=1` skips the prompt); this is the intended way to
-test plugin changes before merging. `AGENTS=claude` / `AGENTS=agy` limits the
-install to one agent.
+`just install` (and `just install-claude` / `just install-agy`) links from the
+worktree it runs in. From a feature worktree it warns and asks first (`YES=1`
+skips the prompt); this is the intended way to test plugin changes before
+merging.
 
 ## Working in This Repository
 

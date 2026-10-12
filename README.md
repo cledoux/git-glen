@@ -10,8 +10,7 @@ teardown.
 
 ```text
 git-glen/
-├── Makefile                    # Build, test, and install (delegates to scripts/install.sh)
-├── scripts/install.sh          # Detects claude/agy and symlinks the CLI + plugin into each
+├── Justfile                    # Build, test, and install recipes (CLI + Claude/Antigravity plugins)
 ├── plugin.json                 # Antigravity plugin manifest
 ├── hooks.json                  # Antigravity hooks
 ├── .claude-plugin/plugin.json  # Claude Code plugin manifest
@@ -62,31 +61,33 @@ git-glen/
     └── sigterm/            # Branch: fix/sigterm
 ```
 
-## Installation (`make install`)
+## Installation (`just install`)
 
-Run `make install` to compile `bin/glen` and `bin/git-glen`, link them onto your
-PATH, and install the plugin for every supported agent found on PATH:
+Run `just install` to compile `bin/glen` and `bin/git-glen`, link them onto your
+PATH, and install the plugin for each detected agent directory (`~/.claude`,
+`~/.gemini`):
 
 ```bash
-make install                # CLI + plugin for each of claude / agy present
-make install AGENTS=claude  # limit to one agent (AGENTS= for the CLI only)
+just install         # CLI + plugin for each detected agent directory (~/.claude, ~/.gemini)
+just install-claude  # link the Claude Code plugin only
+just install-agy     # link the Antigravity plugin only
 ```
 
 It creates direct symlinks, so edits in the source worktree are live:
 
 - `~/.local/bin/{glen,git-glen}` -> `<repo>/bin/{glen,git-glen}`
   (`git-glen` enables `git glen <subcommand>`)
-- **Claude Code** (`claude` on PATH):
+- **Claude Code** (`~/.claude` present, or `just install-claude`):
   `~/.claude/skills/glen/{.claude-plugin,README.md,rules,skills,hooks}` ->
   `<repo>/...`, loaded as the `glen@skills-dir` plugin. Start a new session to
   pick it up.
-- **Antigravity** (`agy` on PATH):
+- **Antigravity** (`~/.gemini` present, or `just install-agy`):
   `~/.gemini/config/plugins/glen/{plugin.json,README.md,assets,rules,skills,hooks.json}`
   -> `<repo>/...`. Restart Antigravity (or reload the window).
 
 The hooks call `glen` from PATH, so keep `~/.local/bin` on PATH.
 
-`make install` links from whichever worktree you run it in. It warns when that
+`just install` links from whichever worktree you run it in. It warns when that
 is not a glen-managed workspace, and warns and asks before installing from a
 worktree other than the default branch (`YES=1` skips the prompt), since those
 links break once the worktree is removed.
