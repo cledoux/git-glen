@@ -12,21 +12,22 @@ that agent's own file.
 
 ```text
 git-glen/
-├── Justfile                    # Build, test, and install recipes (CLI + Claude/Antigravity plugins)
-├── plugin.json                 # Antigravity plugin manifest
-├── hooks.json                  # Antigravity hooks (PreToolUse -> glen hook)
-├── .claude-plugin/plugin.json  # Claude Code plugin manifest
-├── hooks/hooks.json            # Claude Code hooks (SessionStart, PreToolUse -> glen hook)
-├── assets/                     # Plugin logo assets
-├── rules/                      # Pure Bare guidance (Antigravity rule; Claude SessionStart context)
-├── skills/                     # Shared skills (worktree, worktree-init, commit, submit, shipit, just, retro)
-├── bin/                        # Compiled binaries (bin/glen, bin/git-glen)
-└── src/                        # Go module (git-glen)
-    ├── cmd/glen/               # CLI entrypoint (init, list, create, remove, prune, repair, hook)
-    ├── worktree/               # Exported package: Pure Bare init, worktree lifecycle, topology discovery
+├── Justfile                        # Build, test, and install recipes (CLI + Claude/Antigravity plugins)
+├── plugin/                         # Distributable plugin directory (symlinked into agent plugin dirs)
+│   ├── plugin.json                 # Antigravity plugin manifest
+│   ├── hooks.json                  # Antigravity hooks (PreToolUse -> glen hook)
+│   ├── .claude-plugin/plugin.json  # Claude Code plugin manifest
+│   ├── hooks/hooks.json            # Claude Code hooks (SessionStart, PreToolUse -> glen hook)
+│   ├── assets/                     # Plugin logo assets
+│   ├── rules/                      # Pure Bare guidance (Antigravity rule; Claude SessionStart context)
+│   └── skills/                     # Shared skills (worktree, worktree-init, commit, submit, shipit, just, retro)
+├── bin/                            # Compiled binaries (bin/glen, bin/git-glen)
+└── src/                            # Go module (git-glen)
+    ├── cmd/glen/                   # CLI entrypoint (init, list, create, remove, prune, repair, hook)
+    ├── worktree/                   # Exported package: Pure Bare init, worktree lifecycle, topology discovery
     └── internal/
-        ├── hook/               # Agent-neutral guard logic behind `glen hook`
-        └── testutil/           # Hermetic Git workspace test fixtures
+        ├── hook/                   # Agent-neutral guard logic behind `glen hook`
+        └── testutil/               # Hermetic Git workspace test fixtures
 ```
 
 ## Development & Testing Commands
@@ -64,10 +65,10 @@ once the plugin is installed.
   parameters (e.g. Antigravity's `BypassSandbox`). Describe intent ("re-run
   with sandbox escalation") and let each agent map it.
 - **Two hook manifests**: Guard behavior changes go in `src/internal/hook`;
-  `hooks.json` (Antigravity) and `hooks/hooks.json` (Claude Code) only wire
-  events to `glen hook`. Keep both manifests in sync.
-- **Manifest versions**: Keep `version` identical in `plugin.json` and
-  `.claude-plugin/plugin.json`.
+  `plugin/hooks.json` (Antigravity) and `plugin/hooks/hooks.json` (Claude Code)
+  only wire events to `glen hook`. Keep both manifests in sync.
+- **Manifest versions**: Keep `version` identical in `plugin/plugin.json` and
+  `plugin/.claude-plugin/plugin.json`.
 
 ## Debugging Hooks
 
@@ -86,4 +87,5 @@ Antigravity hook behavior (verified against agy, 2026-10):
   `TargetFile`; `run_command` carries `CommandLine` and `Cwd`.
 - To test the plugin without installing it globally, declare it in a scratch
   workspace's `.agents/plugins.json`:
-  `{"entries":[{"path":"/path/to/worktree"}]}`.
+  `{"entries":[{"path":"/path/to/worktree/plugin"}]}` (or run
+  `claude --plugin-dir /path/to/worktree/plugin` for Claude Code).
