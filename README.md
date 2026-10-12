@@ -6,41 +6,42 @@ workflows—from **Pure Bare Repository Root** initialization and isolated branc
 worktrees to atomic commits, pull request reviews, and clean post-merge
 teardown.
 
-### Repository Layout
+## Repository Layout
 
 ```text
 git-glen/
-├── Justfile                    # Build, test, and install recipes (CLI + Claude/Antigravity plugins)
-├── plugin.json                 # Antigravity plugin manifest
-├── hooks.json                  # Antigravity hooks
-├── .claude-plugin/plugin.json  # Claude Code plugin manifest
-├── hooks/hooks.json            # Claude Code hooks
-├── assets/                     # Plugin logo assets
-├── rules/
-│   └── pure-bare-worktrees.md  # Pure Bare workflow guidance shared by both agents
-├── skills/                     # Workflow skills (commit, just, retro, shipit, submit, worktree, worktree-init)
-├── bin/                        # Compiled binaries (bin/glen, bin/git-glen)
-└── src/                        # Go module (git-glen)
-    ├── cmd/glen/               # Standalone CLI entrypoint
-    ├── worktree/               # Exported Go package (init, manager, topology)
+├── Justfile                        # Build, test, and install recipes (CLI + Claude/Antigravity plugins)
+├── plugin/                         # Distributable plugin directory (symlinked into agent plugin dirs)
+│   ├── plugin.json                 # Antigravity plugin manifest
+│   ├── hooks.json                  # Antigravity hooks
+│   ├── .claude-plugin/plugin.json  # Claude Code plugin manifest
+│   ├── hooks/hooks.json            # Claude Code hooks
+│   ├── assets/                     # Plugin logo assets
+│   ├── rules/
+│   │   └── pure-bare-worktrees.md  # Pure Bare workflow guidance shared by both agents
+│   └── skills/                     # Workflow skills (commit, just, retro, shipit, submit, worktree, worktree-init)
+├── bin/                            # Compiled binaries (bin/glen, bin/git-glen)
+└── src/                            # Go module (git-glen)
+    ├── cmd/glen/                   # Standalone CLI entrypoint
+    ├── worktree/                   # Exported Go package (init, manager, topology)
     └── internal/
-        ├── hook/               # Agent-neutral guard logic behind `glen hook`
-        └── testutil/           # Hermetic Git workspace test fixtures
+        ├── hook/                   # Agent-neutral guard logic behind `glen hook`
+        └── testutil/               # Hermetic Git workspace test fixtures
 ```
 
 ## Bundled Plugin Components
 
-| Component                 | Path                            | Description                                                                                                                                                                                                     |
-| :------------------------ | :------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Guard Hooks**           | `hooks.json`, `hooks/hooks.json` | `PreToolUse` hooks (both agents) run `glen hook` to block edits inside the default-branch worktree and `gh pr merge --delete-branch`. Fail open if `glen` is missing or errors.                               |
-| **Workflow Rule**         | `rules/pure-bare-worktrees.md`  | Pure Bare root awareness, feature worktree isolation (`<root>/<branch-name>`), Glen/skill delegation, sandbox notes, and safe PR merges. Loaded as an Antigravity rule; injected by a Claude `SessionStart` hook inside Pure Bare workspaces. |
-| **`worktree` Skill**      | `skills/worktree/SKILL.md`      | Day-to-day runbook for inspecting, creating, working within, pushing, and tearing down isolated branch worktrees via `glen` (`list`, `create`, `remove`, `prune`). Includes `references/pure-bare-topology.md`. |
-| **`worktree-init` Skill** | `skills/worktree-init/SKILL.md` | 5-scenario repository initialization, in-place standard clone conversion (with zero-tolerance dirty-tree guard), legacy `repo/` sibling migration, and worktree pointer/lock repair via `glen init`.            |
-| **`commit` Skill**        | `skills/commit/SKILL.md`        | Branch-based atomic commit workflow and pull request creation/update. `draft` opens a draft PR, `local` commits without pushing; a later plain invocation promotes either to a ready PR.                       |
-| **`submit` Skill**        | `skills/submit/SKILL.md`        | Single-PR submission, CI/review verification, server-side branch cleanup (`delete_branch_on_merge`), `<root>/main` synchronization, and post-merge worktree teardown.                                           |
-| **`shipit` Skill**        | `skills/shipit/SKILL.md`        | Fast-path atomic commit and direct push workflow, bypassing PR overhead for single commits, documentation, ADRs, or lightweight changes.                                                                        |
-| **`just` Skill**          | `skills/just/SKILL.md`          | Reference for `just`, the command runner: recipe discovery, execution, and `justfile` syntax.                                                                                                                   |
-| **`retro` Skill**         | `skills/retro/SKILL.md`         | Structured end-of-session retrospective workflow to review outcomes and friction points, audit installed skills, persist durable context, and hand off a clean roadmap.                                         |
+| Component                 | Path                                   | Description                                                                                                                                                                                                     |
+| :------------------------ | :------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Guard Hooks**           | `plugin/hooks.json`, `plugin/hooks/hooks.json` | `PreToolUse` hooks (both agents) run `glen hook` to block edits inside the default-branch worktree and `gh pr merge --delete-branch`. Fail open if `glen` is missing or errors.                               |
+| **Workflow Rule**         | `plugin/rules/pure-bare-worktrees.md`  | Pure Bare root awareness, feature worktree isolation (`<root>/<branch-name>`), Glen/skill delegation, sandbox notes, and safe PR merges. Loaded as an Antigravity rule; injected by a Claude `SessionStart` hook inside Pure Bare workspaces. |
+| **`worktree` Skill**      | `plugin/skills/worktree/SKILL.md`      | Day-to-day runbook for inspecting, creating, working within, pushing, and tearing down isolated branch worktrees via `glen` (`list`, `create`, `remove`, `prune`). Includes `references/pure-bare-topology.md`. |
+| **`worktree-init` Skill** | `plugin/skills/worktree-init/SKILL.md` | 5-scenario repository initialization, in-place standard clone conversion (with zero-tolerance dirty-tree guard), legacy `repo/` sibling migration, and worktree pointer/lock repair via `glen init`.            |
+| **`commit` Skill**        | `plugin/skills/commit/SKILL.md`        | Branch-based atomic commit workflow and pull request creation/update. `draft` opens a draft PR, `local` commits without pushing; a later plain invocation promotes either to a ready PR.                       |
+| **`submit` Skill**        | `plugin/skills/submit/SKILL.md`        | Single-PR submission, CI/review verification, server-side branch cleanup (`delete_branch_on_merge`), `<root>/main` synchronization, and post-merge worktree teardown.                                           |
+| **`shipit` Skill**        | `plugin/skills/shipit/SKILL.md`        | Fast-path atomic commit and direct push workflow, bypassing PR overhead for single commits, documentation, ADRs, or lightweight changes.                                                                        |
+| **`just` Skill**          | `plugin/skills/just/SKILL.md`          | Reference for `just`, the command runner: recipe discovery, execution, and `justfile` syntax.                                                                                                                   |
+| **`retro` Skill**         | `plugin/skills/retro/SKILL.md`         | Structured end-of-session retrospective workflow to review outcomes and friction points, audit installed skills, persist durable context, and hand off a clean roadmap.                                         |
 
 ## Pure Bare Repository Topology Overview
 
@@ -78,12 +79,11 @@ It creates direct symlinks, so edits in the source worktree are live:
 - `~/.local/bin/{glen,git-glen}` -> `<repo>/bin/{glen,git-glen}`
   (`git-glen` enables `git glen <subcommand>`)
 - **Claude Code** (`~/.claude` present, or `just install-claude`):
-  `~/.claude/skills/glen/{.claude-plugin,README.md,rules,skills,hooks}` ->
-  `<repo>/...`, loaded as the `glen@skills-dir` plugin. Start a new session to
-  pick it up.
+  `~/.claude/skills/glen` -> `<repo>/plugin`, loaded as the `glen@skills-dir`
+  plugin. Start a new session to pick it up.
 - **Antigravity** (`~/.gemini` present, or `just install-agy`):
-  `~/.gemini/config/plugins/glen/{plugin.json,README.md,assets,rules,skills,hooks.json}`
-  -> `<repo>/...`. Restart Antigravity (or reload the window).
+  `~/.gemini/config/plugins/glen` -> `<repo>/plugin`. Restart Antigravity (or
+  reload the window).
 
 The hooks call `glen` from PATH, so keep `~/.local/bin` on PATH.
 

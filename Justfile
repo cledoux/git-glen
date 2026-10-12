@@ -50,12 +50,9 @@ install-claude: _check-worktree
   #!/usr/bin/env bash
   set -euo pipefail
   repo={{ quote(justfile_directory()) }}
-  echo "Installing Claude Code plugin into $CLAUDE_PLUGIN_DIR"
-  mkdir -p "$CLAUDE_PLUGIN_DIR"
-  for c in .claude-plugin README.md rules skills hooks; do
-    ln -sfn "$repo/$c" "$CLAUDE_PLUGIN_DIR/$c"
-    echo "  $CLAUDE_PLUGIN_DIR/$c -> $repo/$c"
-  done
+  mkdir -p "$(dirname "$CLAUDE_PLUGIN_DIR")"
+  ln -sfn "$repo/plugin" "$CLAUDE_PLUGIN_DIR"
+  echo "Linked Claude Code plugin: $CLAUDE_PLUGIN_DIR -> $repo/plugin"
   echo "  Start a new Claude Code session to load it as glen@skills-dir."
 
 # Symlink the Antigravity plugin into AGY_PLUGIN_DIR
@@ -63,12 +60,9 @@ install-agy: _check-worktree
   #!/usr/bin/env bash
   set -euo pipefail
   repo={{ quote(justfile_directory()) }}
-  echo "Installing Antigravity plugin into $AGY_PLUGIN_DIR"
-  mkdir -p "$AGY_PLUGIN_DIR"
-  for c in plugin.json README.md assets rules skills hooks.json; do
-    ln -sfn "$repo/$c" "$AGY_PLUGIN_DIR/$c"
-    echo "  $AGY_PLUGIN_DIR/$c -> $repo/$c"
-  done
+  mkdir -p "$(dirname "$AGY_PLUGIN_DIR")"
+  ln -sfn "$repo/plugin" "$AGY_PLUGIN_DIR"
+  echo "Linked Antigravity plugin: $AGY_PLUGIN_DIR -> $repo/plugin"
   echo "  Restart Antigravity (or reload the window) to load it."
 
 # Build, then link the CLI and plugins for any detected agent directories
