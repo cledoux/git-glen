@@ -19,7 +19,7 @@ git-glen/
 ├── assets/                     # Plugin logo assets
 ├── rules/
 │   └── pure-bare-worktrees.md  # Pure Bare workflow guidance shared by both agents
-├── skills/                     # Workflow skills (commit, shipit, submit, worktree, worktree-init)
+├── skills/                     # Workflow skills (commit, just, retro, shipit, submit, worktree, worktree-init)
 ├── bin/                        # Compiled binaries (bin/glen, bin/git-glen)
 └── src/                        # Go module (git-glen)
     ├── cmd/glen/               # Standalone CLI entrypoint
@@ -40,6 +40,8 @@ git-glen/
 | **`commit` Skill**        | `skills/commit/SKILL.md`        | Branch-based atomic commit workflow and pull request creation/update. `draft` opens a draft PR, `local` commits without pushing; a later plain invocation promotes either to a ready PR.                       |
 | **`submit` Skill**        | `skills/submit/SKILL.md`        | Single-PR submission, CI/review verification, server-side branch cleanup (`delete_branch_on_merge`), `<root>/main` synchronization, and post-merge worktree teardown.                                           |
 | **`shipit` Skill**        | `skills/shipit/SKILL.md`        | Fast-path atomic commit and direct push workflow, bypassing PR overhead for single commits, documentation, ADRs, or lightweight changes.                                                                        |
+| **`just` Skill**          | `skills/just/SKILL.md`          | Reference for `just`, the command runner: recipe discovery, execution, and `justfile` syntax.                                                                                                                   |
+| **`retro` Skill**         | `skills/retro/SKILL.md`         | Structured end-of-session retrospective workflow to review outcomes and friction points, audit installed skills, persist durable context, and hand off a clean roadmap.                                         |
 
 ## Pure Bare Repository Topology Overview
 

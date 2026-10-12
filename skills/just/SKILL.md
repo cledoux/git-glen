@@ -16,14 +16,14 @@ Discovery
 - `just --help` Print detailed command-line syntax help
 - `just --list` Print recipes with descriptions
 - `just --show <RECIPE>` Print recipe source
-- `just --summary` Print recipes without descriptiosn
+- `just --summary` Print recipes without descriptions
 
 Execution
 ---------
 
 - `just` Run default recipe
 - `just <RECIPE>` Run specific recipe
-- `just <RECIPE> <ARG1> <ARG2` Run recipe with arguments
+- `just <RECIPE> <ARG1> <ARG2>` Run recipe with arguments
 
 Syntax
 ------
@@ -59,7 +59,7 @@ publish:
 Notes
 -----
 
-The comment proceeding a recipe is used as its doc-comment, and included in
+The comment preceding a recipe is used as its doc-comment, and included in
 `just --list`.
 
 By default, each line of a recipe runs in a fresh shell. Recipes whose bodies
