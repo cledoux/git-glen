@@ -20,7 +20,7 @@ git-glen/
 │   ├── hooks/hooks.json            # Claude Code hooks (SessionStart, PreToolUse -> glen hook)
 │   ├── assets/                     # Plugin logo assets
 │   ├── rules/                      # Pure Bare guidance (Antigravity rule; Claude SessionStart context)
-│   └── skills/                     # Shared skills (worktree, worktree-init, commit, submit, shipit, just, retro)
+│   └── skills/                     # Shared skills (worktree, worktree-init, commit, submit, shipit, just, prime, retro)
 ├── bin/                            # Compiled binaries (bin/glen, bin/git-glen)
 └── src/                            # Go module (git-glen)
     ├── cmd/glen/                   # CLI entrypoint (init, list, create, remove, prune, repair, hook)

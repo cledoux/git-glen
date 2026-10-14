@@ -19,7 +19,7 @@ git-glen/
 │   ├── assets/                     # Plugin logo assets
 │   ├── rules/
 │   │   └── pure-bare-worktrees.md  # Pure Bare workflow guidance shared by both agents
-│   └── skills/                     # Workflow skills (commit, just, retro, shipit, submit, worktree, worktree-init)
+│   └── skills/                     # Workflow skills (commit, just, prime, retro, shipit, submit, worktree, worktree-init)
 ├── bin/                            # Compiled binaries (bin/glen, bin/git-glen)
 └── src/                            # Go module (git-glen)
     ├── cmd/glen/                   # Standalone CLI entrypoint
@@ -41,6 +41,7 @@ git-glen/
 | **`submit` Skill**        | `plugin/skills/submit/SKILL.md`        | Single-PR submission, CI/review verification, server-side branch cleanup (`delete_branch_on_merge`), `<root>/main` synchronization, and post-merge worktree teardown.                                           |
 | **`shipit` Skill**        | `plugin/skills/shipit/SKILL.md`        | Fast-path atomic commit and direct push workflow, bypassing PR overhead for single commits, documentation, ADRs, or lightweight changes.                                                                        |
 | **`just` Skill**          | `plugin/skills/just/SKILL.md`          | Reference for `just`, the command runner: recipe discovery, execution, and `justfile` syntax.                                                                                                                   |
+| **`prime` Skill**         | `plugin/skills/prime/SKILL.md`         | Session context priming wrapper that delegates to an installed downstream `*prime` skill and inspects active Git worktrees and open pull requests to surface ongoing work.                                     |
 | **`retro` Skill**         | `plugin/skills/retro/SKILL.md`         | Structured end-of-session retrospective workflow to review outcomes and friction points, audit installed skills, persist durable context, and hand off a clean roadmap.                                         |
 
 ## Pure Bare Repository Topology Overview
