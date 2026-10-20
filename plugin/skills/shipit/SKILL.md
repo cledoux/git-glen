@@ -75,8 +75,8 @@ ______________________________________________________________________
 ### Step 5: Fast-Path Merge & Direct Push
 
 State-changing Git commands (`add`, `commit`, `pull`, `merge`, `push`,
-`worktree remove`, `branch -d`) write to `.bare/`; if a terminal sandbox
-rejects them, re-run with sandbox escalation:
+`worktree remove`, `branch -d`) write to `.bare/`; if a terminal sandbox rejects
+them, re-run with sandbox escalation:
 
 1. **If on `main` (`<root>/main` or standard clone)**:
    - Stage target files: `git -C <main-path> add ...`
@@ -102,6 +102,17 @@ rejects them, re-run with sandbox escalation:
      `git merge --ff-only <feature-branch>`
    - Push to remote: `git push origin main`
    - Clean up local feature branch: `git branch -d <feature-branch>`
+1. **GitHub Branch Protection / Rulesets (`GH013`)**:
+   - If `git push` directly to the default branch (`main`/`master`) is rejected
+     by GitHub branch protection or repository rulesets (e.g.,
+     `remote: error: GH013: Repository rule violations found`), do **not**
+     attempt to bypass rules or leave changes unpushed.
+   - Instead, automatically fall back to the branch-based PR workflow: create a
+     feature worktree/branch (`glen create <branch-name>` in a Pure Bare repo,
+     or `git switch -c <branch-name>` in a standard clone), move/cherry-pick the
+     commit onto that feature branch, reset the local default branch back to
+     `origin/<default-branch>`, and open a pull request using the **`commit`**
+     skill (`../commit/SKILL.md`).
 
 ______________________________________________________________________
 
