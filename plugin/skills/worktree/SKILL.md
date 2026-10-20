@@ -115,6 +115,11 @@ git --git-dir=<root>/.bare fetch origin
        <root>/<branch-name> \
        -b <branch-name> origin/main
    ```
+   - **Building on a Non-Default Base Branch**: When instructed to build on top
+     of an existing non-`main` branch (e.g. a teammate's branch or an unmerged
+     stacked base branch), always create a new feature worktree/branch off that
+     base branch (`glen create <new-branch> <base-branch>`) rather than editing
+     or committing directly onto the base branch's worktree.
 1. Set `core.bare = false` in the worktree's isolated config:
    ```bash
    git -C <root>/<branch-name> config --worktree core.bare false
