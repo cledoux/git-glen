@@ -93,6 +93,26 @@ ______________________________________________________________________
    - Default to `--squash` or `--rebase` to preserve a clean, linear Git history
      on `main`. Avoid merge commits unless explicitly mandated by repository
      policy.
+   - **Stacked PRs & Async Merge API**: When merging a PR that is part of a
+     stack (where another open PR targets this PR's branch, or this PR was part
+     of a stack), standard `gh pr merge` may fail with GraphQL / HTTP 403 errors
+     (`PullRequest.isInMergeQueue` or branch restriction errors):
+     - Use GitHub's asynchronous merge REST API fallback:
+       ```bash
+       gh api -X PUT /repos/<owner>/<repo>/pulls/<pr-number>/merge-async \
+           -f merge_method=squash \
+           -f merge_action=direct_merge
+       ```
+     - Poll merge status until complete:
+       ```bash
+       gh pr view <pr-number> --json state,mergedAt
+       ```
+     - If any downstream open PR in the stack was targeting the just-merged
+       branch, retarget its base branch to the default branch before or after
+       merging so it isn't orphaned or auto-closed:
+       ```bash
+       gh pr edit <next-pr-number> --base <default-branch>
+       ```
    - **Remote Branch Deletion Fallback**: If `delete_branch_on_merge` is not
      enabled on the repository and the remote branch remains after merge:
      ```bash
