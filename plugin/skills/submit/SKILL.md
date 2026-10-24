@@ -44,7 +44,7 @@ ______________________________________________________________________
    user which specific PR or branch to submit.
 1. Look up the PR associated strictly with the active branch:
    ```bash
-   gh pr view --head "<branch-name>" --json number,title,state,reviewDecision,mergeable,headRefName
+   gh pr view "<branch-name>" --json number,title,state,reviewDecision,mergeable,headRefName
    ```
    Verify that `headRefName` matches `<branch-name>`.
 
