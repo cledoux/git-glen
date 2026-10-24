@@ -45,13 +45,33 @@ _check-worktree:
     fi
   fi
 
+# Point DEST at this repo's plugin/, replacing a stale pre-plugin/ install.
+# Older installs made DEST a real directory of per-item symlinks; `ln -sfn`
+# cannot replace a directory and would nest the new link inside it instead.
+_link-plugin dest:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  repo={{ quote(justfile_directory()) }}
+  dest={{ quote(dest) }}
+  if [[ -d $dest && ! -L $dest ]]; then
+    if [[ -n $(find "$dest" -mindepth 1 -maxdepth 1 ! -type l) ]]; then
+      printf 'ERROR: %s\n' "$dest is a directory containing real files, not a glen symlink." \
+        "Inspect and remove it manually, then re-run the install." >&2
+      exit 1
+    fi
+    printf 'WARNING: %s\n' "replacing stale plugin directory $dest (contained only symlinks)." >&2
+    find "$dest" -mindepth 1 -maxdepth 1 -type l -delete
+    rmdir "$dest"
+  fi
+  mkdir -p "$(dirname "$dest")"
+  ln -sfn "$repo/plugin" "$dest"
+
 # Symlink the Claude Code plugin into CLAUDE_PLUGIN_DIR
 install-claude: _check-worktree
   #!/usr/bin/env bash
   set -euo pipefail
   repo={{ quote(justfile_directory()) }}
-  mkdir -p "$(dirname "$CLAUDE_PLUGIN_DIR")"
-  ln -sfn "$repo/plugin" "$CLAUDE_PLUGIN_DIR"
+  {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} _link-plugin "$CLAUDE_PLUGIN_DIR"
   echo "Linked Claude Code plugin: $CLAUDE_PLUGIN_DIR -> $repo/plugin"
   echo "  Start a new Claude Code session to load it as glen@skills-dir."
 
@@ -60,8 +80,7 @@ install-agy: _check-worktree
   #!/usr/bin/env bash
   set -euo pipefail
   repo={{ quote(justfile_directory()) }}
-  mkdir -p "$(dirname "$AGY_PLUGIN_DIR")"
-  ln -sfn "$repo/plugin" "$AGY_PLUGIN_DIR"
+  {{ quote(just_executable()) }} --justfile {{ quote(justfile()) }} _link-plugin "$AGY_PLUGIN_DIR"
   echo "Linked Antigravity plugin: $AGY_PLUGIN_DIR -> $repo/plugin"
   echo "  Restart Antigravity (or reload the window) to load it."
 
