@@ -50,14 +50,16 @@ sandbox escalation. Read-only commands (`git status`, `git diff`, `git log`,
 
 ## 5. Stacked PRs & Safe Pull Request Merges
 
-- **Native GitHub PR Stacks**: Whenever opening a stacked PR targeting a
-  non-default base branch (`gh pr create --base <parent-branch>`), always
-  register or update the native GitHub Pull Request Stack via the REST API
+- **Native GitHub PR Stacks**: When asked to **stack** a PR (e.g., *"stack it on
+  top of PR #72"*, *"create a stacked PR"*) or when decomposing a change into a
+  logical stacked PR chain, remember that `gh pr create --base <parent-branch>`
+  only sets the Git base ref—you **MUST** also register or update the native
+  GitHub Pull Request Stack via the REST API
   (`POST /repos/<owner>/<repo>/stacks` or
   `PATCH /repos/<owner>/<repo>/stacks/<stack_number>` with
   `{"pull_requests": [<parent_pr>, <new_pr>]}`, inspecting existing stacks on
-  the parent PR via GraphQL `ViewerPullRequestStacks`) so GitHub's UI links the
-  stack automatically.
+  the parent PR via GraphQL `ViewerPullRequestStacks`). Do not blindly create a
+  stack merely because `--base <branch>` was used to branch off in-flight work.
 - Enable server-side branch cleanup once per repository:
   `gh repo edit --delete-branch-on-merge`.
 - Merge with `gh pr merge <pr> --squash` **without** `--delete-branch` (it

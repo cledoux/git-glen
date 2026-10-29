@@ -215,42 +215,51 @@ ______________________________________________________________________
        motivation, changes, issue references, and testing evidence.
      - Reviewers / Labels (`--reviewer ...`, `--label ...`): Apply if
        applicable.
-   - **Register Native GitHub PR Stack (Mandatory Whenever `--base` is Not
-     Default Branch)**: Whenever creating or updating a PR whose base branch
-     (`--base <parent-branch>`) is another feature branch (not `main`/`master`),
-     you **MUST** register the PR in a native GitHub Pull Request Stack
-     (`PullRequestStack`) so the GitHub UI links them as a stack automatically:
-     1. Find the parent PR number for `<parent-branch>` and check if it already
-        belongs to a native stack:
-        ```bash
-        PARENT_PR=$(gh pr view "<parent-branch>" --json number --jq .number)
-        gh api graphql -F owner="<owner>" -F name="<repo>" -F pr="$PARENT_PR" -f query='
-          query($owner: String!, $name: String!, $pr: Int!) {
-            repository(owner: $owner, name: $name) {
-              pullRequest(number: $pr) {
-                number
-                ViewerPullRequestStacks {
+   - **Register Native GitHub PR Stack (When Explicitly Stacking PRs)**:
+     - **When to Register a Stack**: Whenever the user explicitly asks to
+       **stack** a PR (e.g., *"stack it on top of PR #72"*, *"stack the PR"*,
+       *"create a stacked PR"*) or when decomposing work into a logical chain of
+       **Stacked PRs** (Step 6), remember that
+       `gh pr create --base <parent-branch>` alone only sets the Git base
+       ref—you **MUST** also create or update the native GitHub Pull Request
+       Stack (`PullRequestStack`) so GitHub's UI links them as a stack
+       automatically.
+     - **When NOT to Register a Stack**: Do **not** blindly create a native
+       GitHub PR Stack every time `--base <non-default-branch>` is used if the
+       branch was merely cut from in-flight work to avoid waiting and is not
+       intended as a stacked PR chain.
+     - **How to Create or Update the Native Stack**:
+       1. Find the parent PR number for `<parent-branch>` and check if it
+          already belongs to a native stack:
+          ```bash
+          PARENT_PR=$(gh pr view "<parent-branch>" --json number --jq .number)
+          gh api graphql -F owner="<owner>" -F name="<repo>" -F pr="$PARENT_PR" -f query='
+            query($owner: String!, $name: String!, $pr: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $pr) {
                   number
-                  id
-                  pullRequests { number }
+                  ViewerPullRequestStacks {
+                    number
+                    id
+                    pullRequests { number }
+                  }
                 }
               }
-            }
-          }'
-        ```
-     1. If `ViewerPullRequestStacks` is empty on the parent PR, create a new
-        native stack via the REST API (ordered bottom/base-first to
-        top/head-last):
-        ```bash
-        echo "{\"pull_requests\": [$PARENT_PR, $NEW_PR]}" | \
-          gh api -X POST "repos/<owner>/<repo>/stacks" --input -
-        ```
-     1. If a stack (`<stack_number>`) already exists on the parent PR, append
-        `$NEW_PR` to the existing ordered `pull_requests` array via `PATCH`:
-        ```bash
-        echo "{\"pull_requests\": [<existing_pr_numbers_in_order>, $NEW_PR]}" | \
-          gh api -X PATCH "repos/<owner>/<repo>/stacks/<stack_number>" --input -
-        ```
+            }'
+          ```
+       1. If `ViewerPullRequestStacks` is empty on the parent PR, create a new
+          native stack via the REST API (ordered bottom/base-first to
+          top/head-last):
+          ```bash
+          echo "{\"pull_requests\": [$PARENT_PR, $NEW_PR]}" | \
+            gh api -X POST "repos/<owner>/<repo>/stacks" --input -
+          ```
+       1. If a stack (`<stack_number>`) already exists on the parent PR, append
+          `$NEW_PR` to the existing ordered `pull_requests` array via `PATCH`:
+          ```bash
+          echo "{\"pull_requests\": [<existing_pr_numbers_in_order>, $NEW_PR]}" | \
+            gh api -X PATCH "repos/<owner>/<repo>/stacks/<stack_number>" --input -
+          ```
 
 1. **Pull Request Body Format**:
 
@@ -275,7 +284,7 @@ ______________________________________________________________________
 If the change set was decomposed into multiple PRs:
 
 1. Repeat Steps 4 and 5 for each subsequent PR.
-1. If PRs are stacked or dependent:
+1. If PRs are stacked as a logical dependent chain:
    - Base the second branch/worktree on the first feature branch.
    - Target the first feature branch as base in
      `gh pr create --base <parent-branch>`.
