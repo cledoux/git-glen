@@ -160,6 +160,11 @@ git --git-dir=<root>/.bare fetch origin
    ```bash
    gh repo edit --delete-branch-on-merge
    ```
+1. When opening a PR targeting a non-default base branch
+   (`gh pr create --base <parent-branch>`), always register or update the native
+   GitHub Pull Request Stack via `POST /repos/<owner>/<repo>/stacks` (or
+   `PATCH /repos/<owner>/<repo>/stacks/<stack_number>`) as documented in
+   `../commit/SKILL.md`.
 
 ### 6. Merge & Post-Merge Cleanup
 

@@ -18,15 +18,15 @@ ______________________________________________________________________
 
 ## Modes
 
-The first argument, if it is `draft` or `local`, selects the mode. Any
-remaining arguments scope which changes to commit or add context on intent;
-with none, consider the whole working tree.
+The first argument, if it is `draft` or `local`, selects the mode. Any remaining
+arguments scope which changes to commit or add context on intent; with none,
+consider the whole working tree.
 
-| Mode              | Commits | Push | Pull request                      |
-| :---------------- | :------ | :--- | :-------------------------------- |
-| *(default)*       | yes     | yes  | open (ready for review) or update |
-| `draft`           | yes     | yes  | open as draft (`--draft`)         |
-| `local`           | yes     | no   | none                              |
+| Mode        | Commits | Push | Pull request                      |
+| :---------- | :------ | :--- | :-------------------------------- |
+| *(default)* | yes     | yes  | open (ready for review) or update |
+| `draft`     | yes     | yes  | open as draft (`--draft`)         |
+| `local`     | yes     | no   | none                              |
 
 **Promotion**: a plain (default-mode) invocation always finishes the branch's
 journey to a ready-for-review PR, even with nothing new to commit:
@@ -92,10 +92,10 @@ checks:
      `feat/part-1`) and configure the PR base target accordingly.
    - For non-trivial multi-PR splits, confirm the branch names, scope division,
      and dependency plan with the user before proceeding.
-   - If the split or the intent is genuinely ambiguous (two plausible
-     groupings, or a *why* that the diff and conversation do not reveal), ask
-     briefly rather than guessing. A wrong atomic split is harder to untangle
-     afterwards than a short question now.
+   - If the split or the intent is genuinely ambiguous (two plausible groupings,
+     or a *why* that the diff and conversation do not reveal), ask briefly
+     rather than guessing. A wrong atomic split is harder to untangle afterwards
+     than a short question now.
 
 ______________________________________________________________________
 
@@ -112,8 +112,8 @@ Ensure standard project hygiene and verification checks pass:
 1. **Repository & Security Hygiene**:
    - Ensure temporary scratch files, build artifacts, test dumps, or sensitive
      credentials are not accidentally staged. Inspect staged content for
-     anything that looks like a secret, even when the filename looks
-     innocuous, and flag it to the user instead of committing it.
+     anything that looks like a secret, even when the filename looks innocuous,
+     and flag it to the user instead of committing it.
 
 ______________________________________________________________________
 
@@ -178,8 +178,8 @@ For each planned PR:
 1. **Commit Safety**:
 
    - Never bypass hooks or signing (`--no-verify`, `--no-gpg-sign`,
-     `-c commit.gpgsign=false`). If a hook fails, fix the cause and create a
-     new commit.
+     `-c commit.gpgsign=false`). If a hook fails, fix the cause and create a new
+     commit.
    - Never amend an existing commit unless the user explicitly asks.
 
 1. **`local` mode**: skip Step 5 and the PR parts of Step 6; still build each
@@ -201,8 +201,7 @@ ______________________________________________________________________
    - If a PR already exists for the branch, the push updates it. In default
      mode, if it is a draft, mark it ready: `gh pr ready <pr>`. Then skip to
      Step 6.
-   - Otherwise create one with `gh pr create`, adding `--draft` in `draft`
-     mode.
+   - Otherwise create one with `gh pr create`, adding `--draft` in `draft` mode.
    - Prefer command-line tools over web UIs.
    - Ensure the repository has `delete_branch_on_merge` enabled:
      ```bash
@@ -216,6 +215,42 @@ ______________________________________________________________________
        motivation, changes, issue references, and testing evidence.
      - Reviewers / Labels (`--reviewer ...`, `--label ...`): Apply if
        applicable.
+   - **Register Native GitHub PR Stack (Mandatory Whenever `--base` is Not
+     Default Branch)**: Whenever creating or updating a PR whose base branch
+     (`--base <parent-branch>`) is another feature branch (not `main`/`master`),
+     you **MUST** register the PR in a native GitHub Pull Request Stack
+     (`PullRequestStack`) so the GitHub UI links them as a stack automatically:
+     1. Find the parent PR number for `<parent-branch>` and check if it already
+        belongs to a native stack:
+        ```bash
+        PARENT_PR=$(gh pr view "<parent-branch>" --json number --jq .number)
+        gh api graphql -F owner="<owner>" -F name="<repo>" -F pr="$PARENT_PR" -f query='
+          query($owner: String!, $name: String!, $pr: Int!) {
+            repository(owner: $owner, name: $name) {
+              pullRequest(number: $pr) {
+                number
+                ViewerPullRequestStacks {
+                  number
+                  id
+                  pullRequests { number }
+                }
+              }
+            }
+          }'
+        ```
+     1. If `ViewerPullRequestStacks` is empty on the parent PR, create a new
+        native stack via the REST API (ordered bottom/base-first to
+        top/head-last):
+        ```bash
+        echo "{\"pull_requests\": [$PARENT_PR, $NEW_PR]}" | \
+          gh api -X POST "repos/<owner>/<repo>/stacks" --input -
+        ```
+     1. If a stack (`<stack_number>`) already exists on the parent PR, append
+        `$NEW_PR` to the existing ordered `pull_requests` array via `PATCH`:
+        ```bash
+        echo "{\"pull_requests\": [<existing_pr_numbers_in_order>, $NEW_PR]}" | \
+          gh api -X PATCH "repos/<owner>/<repo>/stacks/<stack_number>" --input -
+        ```
 
 1. **Pull Request Body Format**:
 
@@ -246,6 +281,10 @@ If the change set was decomposed into multiple PRs:
      `gh pr create --base <parent-branch>`.
    - Explicitly document dependencies in the PR description (e.g.,
      `Depends on #<pr_number>`).
+   - Register or update the native GitHub PR Stack via
+     `POST /repos/<owner>/<repo>/stacks` (or
+     `PATCH /repos/<owner>/<repo>/stacks/<stack_number>`) with the full ordered
+     list `{"pull_requests": [<pr_1>, <pr_2>, ...]}` as detailed in Step 5.
 
 ______________________________________________________________________
 
@@ -255,10 +294,11 @@ ______________________________________________________________________
    - `git -C <worktree-path> status` (confirm working tree is clean)
    - `git -C <worktree-path> log -n <count> --oneline`
 1. Present a concise summary to the user:
-   - Mode used, and whether the PR is draft or ready (or that commits are
-     local only, with a reminder that a plain `commit` invocation will push
-     and open the PR)
-   - Pull Request link(s) / URL(s)
+   - Mode used, and whether the PR is draft or ready (or that commits are local
+     only, with a reminder that a plain `commit` invocation will push and open
+     the PR)
+   - Pull Request link(s) / URL(s) (and native GitHub PR Stack number
+     `Stack #<number>` whenever the PR is stacked)
    - Branch name(s), worktree path(s), and base target(s)
    - Linked issues / tracking IDs
    - Brief summary of atomic commits included in each PR

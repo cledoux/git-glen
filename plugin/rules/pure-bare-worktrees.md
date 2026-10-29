@@ -15,9 +15,9 @@ explain the workflow so you never hit them.
 - `<root>/` contains only `.bare/`, `.git` (`gitdir: ./.bare`), `main/`, and
   `<branch-name>/` worktrees. It has `core.bare = true` and is NOT a working
   tree.
-- **NEVER run working-tree Git commands** (`git status`, `git diff`,
-  `git add`, `git commit`, `git checkout`) at `<root>/`. Always pass
-  `-C <root>/main` or `-C <root>/<branch-name>`.
+- **NEVER run working-tree Git commands** (`git status`, `git diff`, `git add`,
+  `git commit`, `git checkout`) at `<root>/`. Always pass `-C <root>/main` or
+  `-C <root>/<branch-name>`.
 
 ## 2. Feature Worktree Isolation
 
@@ -48,8 +48,16 @@ Commands that write to `.bare/` or worktree metadata (`glen create`,
 sandbox escalation. Read-only commands (`git status`, `git diff`, `git log`,
 `glen list`) never need it.
 
-## 5. Safe Pull Request Merges
+## 5. Stacked PRs & Safe Pull Request Merges
 
+- **Native GitHub PR Stacks**: Whenever opening a stacked PR targeting a
+  non-default base branch (`gh pr create --base <parent-branch>`), always
+  register or update the native GitHub Pull Request Stack via the REST API
+  (`POST /repos/<owner>/<repo>/stacks` or
+  `PATCH /repos/<owner>/<repo>/stacks/<stack_number>` with
+  `{"pull_requests": [<parent_pr>, <new_pr>]}`, inspecting existing stacks on
+  the parent PR via GraphQL `ViewerPullRequestStacks`) so GitHub's UI links the
+  stack automatically.
 - Enable server-side branch cleanup once per repository:
   `gh repo edit --delete-branch-on-merge`.
 - Merge with `gh pr merge <pr> --squash` **without** `--delete-branch` (it
