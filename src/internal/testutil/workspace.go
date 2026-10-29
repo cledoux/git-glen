@@ -93,6 +93,8 @@ func SetupPureBareWorkspace(t *testing.T) (rootDir, bareDir, mainDir string) {
 		t.Fatalf("failed to write root .git pointer: %v", err)
 	}
 	RunGit(t, bareDir, "config", "extensions.worktreeConfig", "true")
+	RunGit(t, bareDir, "config", "--unset-all", "core.bare")
+	RunGit(t, bareDir, "config", "--worktree", "core.bare", "true")
 	RunGit(t, bareDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 	RunGit(t, bareDir, "config", "push.autoSetupRemote", "true")
 	RunGit(t, bareDir, "config", "branch.autoSetupMerge", "simple")

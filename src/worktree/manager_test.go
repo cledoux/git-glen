@@ -50,13 +50,12 @@ func setupBareRepoTestEnv(t *testing.T) (string, string, *Manager) {
 	}
 
 	// 3. Configure bare repository with standard ADR-0003 config
-	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("configure remote.origin.fetch failed: %v (%s)", err, out)
+	mgr := NewManager(bareDir)
+	if err := mgr.EnsureBareRepoConfig(ctx); err != nil {
+		t.Fatalf("EnsureBareRepoConfig failed: %v", err)
 	}
-	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "config", "extensions.worktreeConfig", "true")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("configure extensions.worktreeConfig failed: %v (%s)", err, out)
+	if err := EnsureRootGitPointer(rootDir); err != nil {
+		t.Fatalf("EnsureRootGitPointer failed: %v", err)
 	}
 	// 4. Create primary 'main' linked worktree
 	mainDir := filepath.Join(rootDir, "main")
@@ -70,7 +69,6 @@ func setupBareRepoTestEnv(t *testing.T) (string, string, *Manager) {
 		t.Fatalf("configure main core.bare false failed: %v (%s)", err, out)
 	}
 
-	mgr := NewManager(bareDir)
 	return rootDir, bareDir, mgr
 }
 
@@ -313,6 +311,17 @@ func TestEnsureBareRepoConfig(t *testing.T) {
 		t.Errorf("expected extensions.worktreeConfig to be 'true', got '%s' (err: %v)", val, err)
 	}
 
+	// AND shared .bare/config SHALL NOT have core.bare set
+	if localBare, err := mgr.runGit(ctx, bareDir, "config", "--local", "--get", "core.bare"); err == nil {
+		t.Errorf("expected shared .bare/config not to set core.bare, got %q", localBare)
+	}
+
+	// AND .bare/config.worktree SHALL have core.bare = true
+	wtBare, err := mgr.runGit(ctx, bareDir, "config", "--worktree", "--get", "core.bare")
+	if err != nil || wtBare != "true" {
+		t.Errorf("expected .bare/config.worktree core.bare to be 'true', got %q (err: %v)", wtBare, err)
+	}
+
 	// AND remote.origin.fetch SHALL be '+refs/heads/*:refs/remotes/origin/*'
 	fetchRefspec, err := mgr.runGit(ctx, bareDir, "config", "--get", "remote.origin.fetch")
 	expectedRefspec := "+refs/heads/*:refs/remotes/origin/*"
@@ -323,6 +332,11 @@ func TestEnsureBareRepoConfig(t *testing.T) {
 	// THEN: Idempotent execution: Calling EnsureBareRepoConfig multiple times should succeed without error or duplicating configs
 	if err := mgr.EnsureBareRepoConfig(ctx); err != nil {
 		t.Fatalf("subsequent EnsureBareRepoConfig call failed: %v", err)
+	}
+
+	wtBareAfter, err := mgr.runGit(ctx, bareDir, "config", "--worktree", "--get", "core.bare")
+	if err != nil || wtBareAfter != "true" {
+		t.Errorf("expected .bare/config.worktree core.bare to remain 'true' after idempotent call, got %q (err: %v)", wtBareAfter, err)
 	}
 
 	allRefspecs, err := mgr.runGit(ctx, bareDir, "config", "--get-all", "remote.origin.fetch")

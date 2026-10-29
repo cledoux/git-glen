@@ -365,12 +365,7 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 		return nil, fmt.Errorf("failed to move .git to .bare: %w", err)
 	}
 
-	// 4. Configure bare database
-	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "config", "core.bare", "true")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to set core.bare true: %w (%s)", err, out)
-	}
-
+	// 4. Configure bare database (sets extensions.worktreeConfig=true, unsets shared core.bare, sets worktree core.bare=true)
 	bareMgr := NewManager(bareDir)
 	if err := bareMgr.EnsureBareRepoConfig(ctx); err != nil {
 		return nil, fmt.Errorf("failed to configure bare repository: %w", err)
@@ -519,10 +514,7 @@ func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*In
 		return nil, fmt.Errorf("failed to move repo/.git to .bare: %w", err)
 	}
 
-	// 4. Configure bare
-	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "config", "core.bare", "true")
-	_ = cmd.Run()
-
+	// 4. Configure bare (sets extensions.worktreeConfig=true, unsets shared core.bare, sets worktree core.bare=true)
 	bareMgr := NewManager(bareDir)
 	if err := bareMgr.EnsureBareRepoConfig(ctx); err != nil {
 		return nil, fmt.Errorf("failed to configure bare repository: %w", err)

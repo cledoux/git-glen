@@ -86,14 +86,17 @@ git --git-dir=<root>/.bare worktree list
 
 ### 2. Fetch Latest Remote State & Ensure Bare Defaults
 
-Ensure `<root>/.git` points to `./.bare`, `.bare` has the wildcard fetch refspec
-and ergonomic defaults configured, and fetch the latest default branch from
-`origin` (or `upstream`):
+Ensure `<root>/.git` points to `./.bare`, `.bare` has per-worktree config
+enabled (`core.bare = true` in `.bare/config.worktree` and removed from shared
+`.bare/config`), the wildcard fetch refspec and ergonomic defaults configured,
+and fetch the latest default branch from `origin` (or `upstream`):
 
 ```bash
 echo "gitdir: ./.bare" > <root>/.git
-git --git-dir=<root>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
 git --git-dir=<root>/.bare config extensions.worktreeConfig true
+git --git-dir=<root>/.bare config --unset-all core.bare || true
+git --git-dir=<root>/.bare config --worktree core.bare true
+git --git-dir=<root>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
 git --git-dir=<root>/.bare config push.autoSetupRemote true
 git --git-dir=<root>/.bare config branch.autoSetupMerge simple
 git --git-dir=<root>/.bare config fetch.prune true
@@ -120,7 +123,7 @@ git --git-dir=<root>/.bare fetch origin
      stacked base branch), always create a new feature worktree/branch off that
      base branch (`glen create <new-branch> <base-branch>`) rather than editing
      or committing directly onto the base branch's worktree.
-1. Set `core.bare = false` in the worktree's isolated config:
+1. Set `core.bare = false` in the worktree's isolated config (defense-in-depth):
    ```bash
    git -C <root>/<branch-name> config --worktree core.bare false
    ```

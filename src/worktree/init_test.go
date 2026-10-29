@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -169,7 +170,32 @@ func assertBareWorkspaceConfigAndPointer(t *testing.T, rootDir, bareDir string) 
 		t.Errorf("expected root .git to contain 'gitdir: ./.bare', got %q", string(data))
 	}
 
+	// Verify shared .bare/config does NOT have core.bare set
+	sharedConfigBytes, err := os.ReadFile(filepath.Join(bareDir, "config"))
+	if err != nil {
+		t.Fatalf("failed to read %s/config: %v", bareDir, err)
+	}
+	if strings.Contains(string(sharedConfigBytes), "bare =") {
+		t.Errorf("expected shared .bare/config not to contain 'bare =', got:\n%s", string(sharedConfigBytes))
+	}
+
+	// Verify .bare/config.worktree has core.bare = true
+	wtBare := testutil.RunGit(t, bareDir, "config", "--worktree", "--get", "core.bare")
+	if wtBare != "true" {
+		t.Errorf("expected .bare/config.worktree core.bare = 'true', got %q", wtBare)
+	}
+
+	// Verify git -C <rootDir> status fails with "must be run in a work tree"
+	statusCmd := exec.Command("git", "-C", rootDir, "status")
+	statusOut, statusErr := statusCmd.CombinedOutput()
+	if statusErr == nil {
+		t.Errorf("expected git -C %s status to fail at bare root, but it succeeded: %s", rootDir, string(statusOut))
+	} else if !strings.Contains(string(statusOut), "this operation must be run in a work tree") {
+		t.Errorf("expected root git status failure to mention 'this operation must be run in a work tree', got: %s", string(statusOut))
+	}
+
 	expectedConfigs := map[string]string{
+		"core.bare":                 "true",
 		"extensions.worktreeConfig": "true",
 		"remote.origin.fetch":       "+refs/heads/*:refs/remotes/origin/*",
 		"push.autoSetupRemote":      "true",
@@ -490,5 +516,34 @@ func TestInitDispatch(t *testing.T) {
 	}
 	if res2.Scenario != ScenarioBareRepair {
 		t.Errorf("expected ScenarioBareRepair, got %s", res2.Scenario)
+	}
+}
+
+func TestPlainGitWorktreeAddWithoutManualCoreBareOverride(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	emptyDir := testutil.SetupGreenfieldDirectory(t)
+	mgr := NewManager("")
+	res, err := mgr.InitGreenfield(ctx, emptyDir)
+	if err != nil {
+		t.Fatalf("InitGreenfield failed: %v", err)
+	}
+
+	// Verify .bare/config does not have bare = true, while .bare/config.worktree has bare = true
+	assertBareWorkspaceConfigAndPointer(t, res.BaseDir, res.BareDir)
+
+	// Provision a worktree using plain `git worktree add` WITHOUT manually setting `config --worktree core.bare false`
+	// (simulating IDE actions like VS Code's `Git: Create Worktree...`).
+	plainWT := filepath.Join(res.BaseDir, "feat", "plain-ide-worktree")
+	if err := os.MkdirAll(filepath.Dir(plainWT), 0755); err != nil {
+		t.Fatalf("failed to create parent dir for plain worktree: %v", err)
+	}
+	testutil.RunGit(t, res.BareDir, "worktree", "add", plainWT, "-b", "feat/plain-ide-worktree", "main")
+
+	// Verify `git -C <plainWT> status` succeeds without error
+	statusOut := testutil.RunGit(t, plainWT, "status")
+	if !strings.Contains(statusOut, "On branch feat/plain-ide-worktree") {
+		t.Errorf("expected git status in plain worktree to report branch feat/plain-ide-worktree, got:\n%s", statusOut)
 	}
 }

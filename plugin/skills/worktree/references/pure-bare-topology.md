@@ -20,7 +20,7 @@ the workspace root matching their branch names:
 graph TD
     subgraph RootDir ["Workspace Root: ~/workspace/my-project/"]
         RootGit[".git (Root Pointer File)<br/>• gitdir: ./.bare"]
-        Bare[".bare/ (Bare Git Database)<br/>• core.bare = true<br/>• remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*<br/>• extensions.worktreeConfig = true<br/>• push.autoSetupRemote = true<br/>• branch.autoSetupMerge = simple<br/>• fetch.prune = true<br/>• worktree.guessRemote = true"]
+        Bare[".bare/ (Bare Git Database)<br/>• config.worktree: core.bare = true<br/>• remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*<br/>• extensions.worktreeConfig = true<br/>• push.autoSetupRemote = true<br/>• branch.autoSetupMerge = simple<br/>• fetch.prune = true<br/>• worktree.guessRemote = true"]
         Main["main/ (Primary Developer Worktree)<br/>• .git pointer -&gt; ../.bare/worktrees/main<br/>• config.worktree: core.bare = false"]
         FeatA["feat/101-auth/ (Feature Worktree)<br/>• .git pointer -&gt; ../../.bare/worktrees/101-auth<br/>• config.worktree: core.bare = false, user.name = Archer"]
         FeatB["feat/102-metrics/ (Feature Worktree)<br/>• .git pointer -&gt; ../../.bare/worktrees/102-metrics<br/>• config.worktree: core.bare = false, user.name = Beckett"]
@@ -40,8 +40,8 @@ graph TD
 1. **Root VCS Recognition (`<root>/.git`)**: Writing `gitdir: ./.bare` into
    `<root>/.git` lets Antigravity, IDEs, shell prompts, and Git metadata
    commands (`git worktree list`, `git fetch`, `git branch`) work directly from
-   `<root>/` while `core.bare = true` in `.bare` still prevents accidental
-   checkouts at the workspace root.
+   `<root>/` while `core.bare = true` in `.bare/config.worktree` still prevents
+   accidental checkouts at the workspace root.
 1. **Symmetric Branch Folder Layout**: Every branch—whether `main`,
    `feat/101-auth`, or `fix/sigterm`—lives directly at `<root>/<branch-name>/`.
 1. **IDE & Language Server Isolation**: Opening `<root>/main` or
@@ -82,24 +82,36 @@ causing subsequent `git fetch origin` runs to silently skip updating
 git --git-dir=<root>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
 ```
 
-### C. Per-Worktree Configuration (`extensions.worktreeConfig`)
+### C. Per-Worktree Configuration (`extensions.worktreeConfig` & `.bare/config.worktree`)
 
-Because `<root>/.bare/config` has `core.bare = true`, linked worktrees inherit
-`core.bare = true` unless per-worktree config is enabled and overridden. Enable
-the extension once on `.bare`:
+`git init --bare` and `git clone --bare` write `bare = true` into the shared
+`<root>/.bare/config`. If `core.bare = true` remains in `.bare/config`, any
+linked worktree created via plain `git worktree add` (such as IDE
+`Git: Create Worktree...` actions) inherits `core.bare = true` and fails on
+working-tree commands unless manually overridden.
+
+Instead, enable `extensions.worktreeConfig` first, unset `core.bare` from the
+shared `.bare/config`, and place `core.bare = true` in `.bare/config.worktree`:
 
 ```bash
 git --git-dir=<root>/.bare config extensions.worktreeConfig true
+git --git-dir=<root>/.bare config --unset-all core.bare || true
+git --git-dir=<root>/.bare config --worktree core.bare true
 ```
 
-Then, in every linked worktree (`main/` and `<branch-name>/`), set:
+This keeps `<root>/` and `.bare/` bare (`git -C <root> status` fails with
+`fatal: this operation must be run in a work tree`) while allowing plain
+`git worktree add` to create immediately functional working trees. For
+defense-in-depth, `glen` also sets `core.bare = false` in each linked worktree
+(`main/` and `<branch-name>/`):
 
 ```bash
 git -C <worktree-path> config --worktree core.bare false
 ```
 
 This writes to `<root>/.bare/worktrees/<worktree-name>/config.worktree`, keeping
-`.bare` bare while allowing full working tree operations in the linked worktree.
+`.bare` bare while guaranteeing full working tree operations in the linked
+worktree.
 
 ### D. Ergonomic Bare Worktree Defaults
 

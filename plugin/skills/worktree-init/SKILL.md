@@ -59,11 +59,14 @@ When given a remote URL (`git@...`, `https://...`, `ssh://...`):
    git clone --bare <repo-url> <target-dir>/.bare
    echo "gitdir: ./.bare" > <target-dir>/.git
    ```
-1. Configure mandatory fetch refspec, per-worktree config isolation, and default
-   bare ergonomics:
+1. Configure per-worktree config isolation (`core.bare = true` in
+   `.bare/config.worktree` and removed from shared `.bare/config`), mandatory
+   fetch refspec, and default bare ergonomics:
    ```bash
-   git --git-dir=<target-dir>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
    git --git-dir=<target-dir>/.bare config extensions.worktreeConfig true
+   git --git-dir=<target-dir>/.bare config --unset-all core.bare || true
+   git --git-dir=<target-dir>/.bare config --worktree core.bare true
+   git --git-dir=<target-dir>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
    git --git-dir=<target-dir>/.bare config push.autoSetupRemote true
    git --git-dir=<target-dir>/.bare config branch.autoSetupMerge simple
    git --git-dir=<target-dir>/.bare config fetch.prune true
@@ -88,9 +91,10 @@ When `<target-dir>/.git` is a standard clone directory:
 1. Move `<target-dir>/.git` to `<target-dir>/.bare` and configure bare settings:
    ```bash
    mv <target-dir>/.git <target-dir>/.bare
-   git --git-dir=<target-dir>/.bare config core.bare true
-   git --git-dir=<target-dir>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
    git --git-dir=<target-dir>/.bare config extensions.worktreeConfig true
+   git --git-dir=<target-dir>/.bare config --unset-all core.bare || true
+   git --git-dir=<target-dir>/.bare config --worktree core.bare true
+   git --git-dir=<target-dir>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
    git --git-dir=<target-dir>/.bare config push.autoSetupRemote true
    git --git-dir=<target-dir>/.bare config branch.autoSetupMerge simple
    git --git-dir=<target-dir>/.bare config fetch.prune true
@@ -115,10 +119,11 @@ When `<target-dir>/.bare` already exists:
    git -C <target-dir>/main worktree repair
    git --git-dir=<target-dir>/.bare worktree repair
    ```
-1. Enforce `remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*`,
-   `extensions.worktreeConfig = true`, `push.autoSetupRemote = true`,
-   `branch.autoSetupMerge = simple`, `fetch.prune = true`, and
-   `worktree.guessRemote = true`.
+1. Enforce `extensions.worktreeConfig = true`, unset `core.bare` from shared
+   `.bare/config`, set `core.bare = true` in `.bare/config.worktree`, and
+   enforce `remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*`,
+   `push.autoSetupRemote = true`, `branch.autoSetupMerge = simple`,
+   `fetch.prune = true`, and `worktree.guessRemote = true`.
 1. Prune expired worktree locks and dangling metadata:
    ```bash
    git --git-dir=<target-dir>/.bare worktree prune --expire now
@@ -131,9 +136,11 @@ When `<target-dir>/repo/.git` exists:
 1. **Mandatory Cleanliness Check**: Run
    `git -C <target-dir>/repo status --porcelain`. Abort if non-empty.
 1. Resolve active branch in `<target-dir>/repo`.
-1. Move `<target-dir>/repo/.git` to `<target-dir>/.bare`, set
-   `core.bare = true`, configure bare defaults, remove `<target-dir>/repo`, and
-   write `echo "gitdir: ./.bare" > <target-dir>/.git`.
+1. Move `<target-dir>/repo/.git` to `<target-dir>/.bare`, enable
+   `extensions.worktreeConfig = true`, unset shared `core.bare`, set
+   `core.bare = true` in `.bare/config.worktree`, configure bare defaults,
+   remove `<target-dir>/repo`, and write
+   `echo "gitdir: ./.bare" > <target-dir>/.git`.
 1. Attach `<target-dir>/main`, set `core.bare = false` on `main`, and run
    `worktree prune --expire now`.
 
@@ -148,6 +155,8 @@ When `<target-dir>` does not exist or is empty:
    git init --bare -b main <target-dir>/.bare
    echo "gitdir: ./.bare" > <target-dir>/.git
    git --git-dir=<target-dir>/.bare config extensions.worktreeConfig true
+   git --git-dir=<target-dir>/.bare config --unset-all core.bare || true
+   git --git-dir=<target-dir>/.bare config --worktree core.bare true
    ```
 1. Provision `<target-dir>/main`, set `core.bare = false`, and create an initial
    `README.md` commit.
@@ -163,6 +172,8 @@ After running initialization or conversion, verify the workspace:
    includes `+refs/heads/*:refs/remotes/origin/*`.
 1. `git --git-dir=<target-dir>/.bare config --get extensions.worktreeConfig`
    returns `true`.
+1. `git --git-dir=<target-dir>/.bare config --worktree --get core.bare` returns
+   `true` (and `.bare/config` does not contain `bare = true`).
 1. `git -C <target-dir> worktree list` shows `<target-dir>/.bare` and
    `<target-dir>/main`.
 1. `git -C <target-dir>/main status` exits `0` with a clean working tree.

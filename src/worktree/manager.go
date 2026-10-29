@@ -3,6 +3,7 @@ package worktree
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -93,15 +94,31 @@ func EnsureRootGitPointer(rootDir string) error {
 }
 
 // Governing: SPEC-0001, ADR-0003, REQ-0003
-// EnsureBareRepoConfig ensures extensions.worktreeConfig, remote.origin.fetch refspec,
-// and ergonomic bare worktree defaults (push.autoSetupRemote, branch.autoSetupMerge,
+// EnsureBareRepoConfig ensures extensions.worktreeConfig, per-worktree core.bare=true in
+// .bare/config.worktree (with core.bare removed from shared .bare/config), remote.origin.fetch
+// refspec, and ergonomic bare worktree defaults (push.autoSetupRemote, branch.autoSetupMerge,
 // fetch.prune, worktree.guessRemote) are configured for a bare repository.
 func (m *Manager) EnsureBareRepoConfig(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
+	// 1. Enable extensions.worktreeConfig first
 	if err := m.EnsureWorktreeConfig(ctx); err != nil {
 		return err
+	}
+
+	// 2. Remove core.bare from shared .bare/config (exit code 5 means key was not present)
+	if _, err := m.runGit(ctx, m.RepoDir, "config", "--unset-all", "core.bare"); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 5 {
+			return fmt.Errorf("failed to unset shared core.bare: %w", err)
+		}
+	}
+
+	// 3. Set core.bare=true in .bare/config.worktree so root/.bare remains bare
+	// without polluting linked worktrees created by plain `git worktree add`.
+	if _, err := m.runGit(ctx, m.RepoDir, "config", "--worktree", "core.bare", "true"); err != nil {
+		return fmt.Errorf("failed to set worktree core.bare=true: %w", err)
 	}
 
 	// Check existing remote.origin.fetch refspecs
