@@ -389,6 +389,24 @@ func TestRepairWorkspace(t *testing.T) {
 	if !res2.Repaired {
 		t.Errorf("expected res2.Repaired true")
 	}
+
+	// Verify repairing rootDir while CWD is inside a DIFFERENT repository's main worktree
+	// does not cross-link the caller repository's .git pointer.
+	otherRoot, _, otherMain := testutil.SetupPureBareWorkspace(t)
+	_ = otherRoot
+	origWd, err := os.Getwd()
+	if err == nil {
+		defer func() { _ = os.Chdir(origWd) }()
+		_ = os.Chdir(otherMain)
+	}
+	beforeGitPtr, _ := os.ReadFile(filepath.Join(otherMain, ".git"))
+	if _, err := mgr.RepairWorkspace(ctx, rootDir); err != nil {
+		t.Fatalf("RepairWorkspace from foreign CWD failed: %v", err)
+	}
+	afterGitPtr, _ := os.ReadFile(filepath.Join(otherMain, ".git"))
+	if string(beforeGitPtr) != string(afterGitPtr) {
+		t.Errorf("caller worktree .git pointer was modified by foreign RepairWorkspace:\nbefore: %s\nafter:  %s", string(beforeGitPtr), string(afterGitPtr))
+	}
 }
 
 func TestMigrateLegacySibling_Clean(t *testing.T) {

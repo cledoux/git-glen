@@ -464,6 +464,7 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 		_ = cmd.Run()
 	}
 	cmd := exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "worktree", "repair")
+	cmd.Dir = bareDir
 	_ = cmd.Run()
 
 	// 2. Enforce bare configuration & fetch refspecs
