@@ -22,16 +22,22 @@ const (
 	ScenarioGreenfield    Scenario = "greenfield"
 )
 
+// InitOptions configures optional behavior during repository initialization, conversion, migration, or repair.
+type InitOptions struct {
+	VSCode bool
+}
+
 // InitResult contains execution summary metadata from repository initialization.
 type InitResult struct {
-	Scenario      Scenario
-	BaseDir       string
-	BareDir       string
-	MainDir       string
-	DefaultBranch string
-	Repaired      bool
-	Migrated      bool
-	Converted     bool
+	Scenario        Scenario
+	BaseDir         string
+	BareDir         string
+	MainDir         string
+	DefaultBranch   string
+	VSCodeWorkspace string
+	Repaired        bool
+	Migrated        bool
+	Converted       bool
 }
 
 // DirtyTreeError indicates that a repository working copy contains uncommitted or untracked files.
@@ -225,25 +231,45 @@ func ProbeDefaultBranch(ctx context.Context, bareDir string) (string, error) {
 
 // Init delegates execution to the appropriate initialization workflow based on target detection.
 func (m *Manager) Init(ctx context.Context, target string) (*InitResult, error) {
+	return m.InitWithOptions(ctx, target, InitOptions{})
+}
+
+// InitWithOptions delegates execution to the appropriate initialization workflow and optionally
+// creates or updates the workspace .code-workspace file.
+func (m *Manager) InitWithOptions(ctx context.Context, target string, opts InitOptions) (*InitResult, error) {
 	scen, resolvedPath, err := DetectScenario(target)
 	if err != nil {
 		return nil, err
 	}
 
+	var res *InitResult
 	switch scen {
 	case ScenarioRemoteClone:
-		return m.InitBareRepo(ctx, target, resolvedPath)
+		res, err = m.InitBareRepo(ctx, target, resolvedPath)
 	case ScenarioCloneConvert:
-		return m.ConvertStandardClone(ctx, resolvedPath)
+		res, err = m.ConvertStandardClone(ctx, resolvedPath)
 	case ScenarioBareRepair:
-		return m.RepairWorkspace(ctx, resolvedPath)
+		res, err = m.RepairWorkspace(ctx, resolvedPath)
 	case ScenarioLegacyMigrate:
-		return m.MigrateLegacySibling(ctx, resolvedPath)
+		res, err = m.MigrateLegacySibling(ctx, resolvedPath)
 	case ScenarioGreenfield:
-		return m.InitGreenfield(ctx, resolvedPath)
+		res, err = m.InitGreenfield(ctx, resolvedPath)
 	default:
 		return nil, fmt.Errorf("unsupported initialization scenario: %s", scen)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	bareMgr := NewManager(res.BareDir)
+	wsPath, err := bareMgr.SyncVSCodeWorkspace(ctx, opts.VSCode)
+	if err != nil {
+		return nil, err
+	}
+	if wsPath != "" {
+		res.VSCodeWorkspace = wsPath
+	}
+	return res, nil
 }
 
 // InitBareRepo clones a remote repository into a Pure Bare root topology (.bare/ + .git + main/).
@@ -459,13 +485,16 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 		branch = "main"
 	}
 
+	wsPath, _ := bareMgr.SyncVSCodeWorkspace(ctx, false)
+
 	return &InitResult{
-		Scenario:      ScenarioBareRepair,
-		BaseDir:       absRoot,
-		BareDir:       bareDir,
-		MainDir:       mainDir,
-		DefaultBranch: branch,
-		Repaired:      true,
+		Scenario:        ScenarioBareRepair,
+		BaseDir:         absRoot,
+		BareDir:         bareDir,
+		MainDir:         mainDir,
+		DefaultBranch:   branch,
+		VSCodeWorkspace: wsPath,
+		Repaired:        true,
 	}, nil
 }
 

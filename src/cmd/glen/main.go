@@ -65,12 +65,12 @@ func printGlenUsage(w io.Writer) {
 	fmt.Fprintf(w, "   or: git glen <subcommand> [options] [arguments]\n\n")
 	fmt.Fprintf(w, "Guided Git worktree and Pure Bare repository workflows.\n\n")
 	fmt.Fprintf(w, "Subcommands:\n")
-	fmt.Fprintf(w, "  init [target]                     Initialize, convert, migrate, or repair repository into Pure Bare topology\n")
+	fmt.Fprintf(w, "  init [--vscode] [target]          Initialize, convert, migrate, or repair repository into Pure Bare topology\n")
 	fmt.Fprintf(w, "  list                              List active Git worktrees in the workspace\n")
 	fmt.Fprintf(w, "  create <branch-or-slug> [base]    Create an isolated worktree at <root>/<branch-name>\n")
 	fmt.Fprintf(w, "  remove <branch-or-slug>           Remove a feature worktree, prune locks, and delete its local branch\n")
 	fmt.Fprintf(w, "  prune                             Prune stale worktree metadata and locks (--expire now)\n")
-	fmt.Fprintf(w, "  repair [target]                   Repair worktree pointers, root .git pointer, and bare config\n")
+	fmt.Fprintf(w, "  repair [--vscode] [target]        Repair worktree pointers, root .git pointer, and bare config\n")
 	fmt.Fprintf(w, "  hook <event> --agent=<agent>      Agent lifecycle hook adapter (Claude Code, Antigravity)\n\n")
 	fmt.Fprintf(w, "Common Options:\n")
 	fmt.Fprintf(w, "  -C <dir>                          Change effective directory before resolving workspace\n")
@@ -82,7 +82,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 
 	var dir string
+	var vscode bool
 	fs.StringVar(&dir, "C", "", "Change directory before executing initialization")
+	fs.BoolVar(&vscode, "vscode", false, "Create or update <repo>.code-workspace file at the workspace root")
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: glen init [options] [target]\n\n")
@@ -117,7 +119,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	mgr := worktree.NewManager("")
-	res, err := mgr.Init(ctx, target)
+	res, err := mgr.InitWithOptions(ctx, target, worktree.InitOptions{VSCode: vscode})
 	if err != nil {
 		var dirtyErr *worktree.DirtyTreeError
 		if errors.As(err, &dirtyErr) {
@@ -146,6 +148,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "Root Pointer:   %s/.git -> ./.bare\n", res.BaseDir)
 	fmt.Fprintf(stdout, "Main Worktree:  %s\n", res.MainDir)
 	fmt.Fprintf(stdout, "Default Branch: %s\n", res.DefaultBranch)
+	if res.VSCodeWorkspace != "" {
+		fmt.Fprintf(stdout, "VSCode File:    %s\n", res.VSCodeWorkspace)
+	}
 	if res.Converted {
 		fmt.Fprintf(stdout, "Note:           Converted standard clone into Pure Bare topology in-place.\n")
 	} else if res.Repaired {

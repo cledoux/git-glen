@@ -114,3 +114,97 @@ func TestRunGlenCommand_Lifecycle(t *testing.T) {
 		t.Fatalf("glen prune failed with code %d: %s", code, stderr.String())
 	}
 }
+
+func TestRunGlenCommand_VSCodeWorkspaceSync(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	emptyDir := testutil.SetupGreenfieldDirectory(t)
+	wsPath := filepath.Join(emptyDir, filepath.Base(emptyDir)+".code-workspace")
+
+	// 1. Default init without --vscode does NOT create .code-workspace
+	var stdout, stderr bytes.Buffer
+	code := RunGlenCommand(ctx, []string{"init", emptyDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen init failed with code %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(wsPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no .code-workspace without --vscode, got err=%v", err)
+	}
+
+	// 2. Running glen init --vscode on the existing Pure Bare repo (bare-repair) creates .code-workspace
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{"init", "--vscode", emptyDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen init --vscode failed with code %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "VSCode File:") {
+		t.Errorf("expected stdout to include VSCode File:, got:\n%s", stdout.String())
+	}
+	if _, err := os.Stat(wsPath); err != nil {
+		t.Fatalf("expected .code-workspace to exist at %s: %v", wsPath, err)
+	}
+
+	checkFolders := func(wantNames ...string) {
+		t.Helper()
+		data, err := os.ReadFile(wsPath)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", wsPath, err)
+		}
+		var parsed struct {
+			Folders []worktree.VSCodeFolder `json:"folders"`
+		}
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("failed to unmarshal %s: %v", wsPath, err)
+		}
+		if len(parsed.Folders) != len(wantNames) {
+			t.Fatalf("folders count = %d (%+v), want %d (%v)", len(parsed.Folders), parsed.Folders, len(wantNames), wantNames)
+		}
+		for i, name := range wantNames {
+			if parsed.Folders[i].Name != name || parsed.Folders[i].Path != name {
+				t.Errorf("folder[%d] = %+v, want name/path %q", i, parsed.Folders[i], name)
+			}
+		}
+	}
+
+	checkFolders("main")
+
+	// 3. glen create adds new worktree to .code-workspace
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{"create", "feat/101-auth", "-C", emptyDir, "--fetch=false"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen create feat/101-auth failed: %s", stderr.String())
+	}
+	checkFolders("main", "feat/101-auth")
+
+	// 4. glen create a second worktree, then delete its directory and run glen prune
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{"create", "feat/102-prune-me", "-C", emptyDir, "--fetch=false"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen create feat/102-prune-me failed: %s", stderr.String())
+	}
+	checkFolders("main", "feat/101-auth", "feat/102-prune-me")
+
+	if err := os.RemoveAll(filepath.Join(emptyDir, "feat", "102-prune-me")); err != nil {
+		t.Fatalf("failed to remove feat/102-prune-me dir: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{"prune", "-C", emptyDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen prune failed: %s", stderr.String())
+	}
+	checkFolders("main", "feat/101-auth")
+
+	// 5. glen remove removes feat/101-auth from .code-workspace
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{"remove", "feat/101-auth", "-C", emptyDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen remove feat/101-auth failed: %s", stderr.String())
+	}
+	checkFolders("main")
+}

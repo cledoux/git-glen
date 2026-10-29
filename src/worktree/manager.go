@@ -166,6 +166,9 @@ func (m *Manager) PruneWorktrees(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to prune worktrees: %w", err)
 	}
+	if IsBareRepo(m.RepoDir) {
+		_, _ = m.SyncVSCodeWorkspace(ctx, false)
+	}
 	return nil
 }
 
@@ -261,6 +264,10 @@ func (m *Manager) CreateWorktree(ctx context.Context, branchName, baseBranch, ag
 		}
 	}
 
+	if isBare {
+		_, _ = m.SyncVSCodeWorkspace(ctx, false)
+	}
+
 	return worktreeDir, branchName, nil
 }
 
@@ -301,6 +308,7 @@ func (m *Manager) RemoveFeatureWorktree(ctx context.Context, worktreeDir, branch
 			}
 			parent = filepath.Dir(parent)
 		}
+		_, _ = m.SyncVSCodeWorkspace(ctx, false)
 	}
 
 	// Delete local feature branch

@@ -56,7 +56,8 @@ Use `glen` (or `git glen`) to manage worktrees deterministically:
 
 ```bash
 # Initialize, convert, migrate, or repair a repository into Pure Bare topology
-glen init [target-dir-or-url] [-C <dir>]
+# Optional --vscode creates/updates <root>/<repo>.code-workspace (kept in sync by create/remove/prune)
+glen init [--vscode] [target-dir-or-url] [-C <dir>]
 
 # List active worktrees and topology paths (read-only; supports --json)
 glen list [-C <workspace-path>] [--json]

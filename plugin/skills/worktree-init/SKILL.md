@@ -44,6 +44,10 @@ glen init -C <parent-dir> git@github.com:example-org/my-project.git
 
 # Scenario B / C / D / E: Convert, repair, migrate, or init a local directory
 glen init [target-dir]
+
+# Optional: Create or update <root>/<repo>.code-workspace with active worktree folders
+# (Once created, glen create/remove/prune/init automatically keep its "folders" array in sync)
+glen init --vscode [target-dir-or-url]
 ```
 
 ______________________________________________________________________
