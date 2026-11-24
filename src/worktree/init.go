@@ -35,6 +35,7 @@ type InitResult struct {
 	MainDir         string
 	DefaultBranch   string
 	VSCodeWorkspace string
+	AgentLinks      []string
 	Repaired        bool
 	Migrated        bool
 	Converted       bool
@@ -343,12 +344,18 @@ func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "branch", "--set-upstream-to=origin/"+branch, branch)
 	_ = cmd.Run()
 
+	agentLinks, err := SyncAgentLinks(absTarget, mainDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &InitResult{
 		Scenario:      ScenarioRemoteClone,
 		BaseDir:       absTarget,
 		BareDir:       bareDir,
 		MainDir:       mainDir,
 		DefaultBranch: branch,
+		AgentLinks:    agentLinks,
 	}, nil
 }
 
@@ -426,12 +433,18 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false")
 	_ = cmd.Run()
 
+	agentLinks, err := SyncAgentLinks(absClone, mainDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &InitResult{
 		Scenario:      ScenarioCloneConvert,
 		BaseDir:       absClone,
 		BareDir:       bareDir,
 		MainDir:       mainDir,
 		DefaultBranch: branch,
+		AgentLinks:    agentLinks,
 		Converted:     true,
 	}, nil
 }
@@ -487,6 +500,10 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 	}
 
 	wsPath, _ := bareMgr.SyncVSCodeWorkspace(ctx, false)
+	agentLinks, err := SyncAgentLinks(absRoot, mainDir)
+	if err != nil {
+		return nil, err
+	}
 
 	return &InitResult{
 		Scenario:        ScenarioBareRepair,
@@ -495,6 +512,7 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 		MainDir:         mainDir,
 		DefaultBranch:   branch,
 		VSCodeWorkspace: wsPath,
+		AgentLinks:      agentLinks,
 		Repaired:        true,
 	}, nil
 }
@@ -574,12 +592,18 @@ func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*In
 	// 9. Remove empty legacy worktrees container if unused
 	_ = os.Remove(filepath.Join(absRoot, "worktrees"))
 
+	agentLinks, err := SyncAgentLinks(absRoot, mainDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &InitResult{
 		Scenario:      ScenarioLegacyMigrate,
 		BaseDir:       absRoot,
 		BareDir:       bareDir,
 		MainDir:       mainDir,
 		DefaultBranch: branch,
+		AgentLinks:    agentLinks,
 		Migrated:      true,
 	}, nil
 }

@@ -38,6 +38,31 @@ func TestRunGlenCommand_Init(t *testing.T) {
 			t.Errorf("expected root .git pointer to exist: %v", err)
 		}
 	})
+
+	t.Run("AgentLinks", func(t *testing.T) {
+		cloneDir := testutil.SetupStandardClone(t, false)
+		if err := os.MkdirAll(filepath.Join(cloneDir, ".agents", "rules"), 0o755); err != nil {
+			t.Fatalf("mkdir .agents/rules: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(cloneDir, ".agents", "rules", "sdd.md"), []byte("# SDD\n"), 0o644); err != nil {
+			t.Fatalf("write sdd.md: %v", err)
+		}
+		testutil.RunGit(t, cloneDir, "add", ".agents")
+		testutil.RunGit(t, cloneDir, "commit", "-m", "Add .agents rules")
+
+		var stdout, stderr bytes.Buffer
+		code := RunGlenCommand(ctx, []string{"init", cloneDir}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("glen init failed with code %d: %s", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "Agent Links:    .agents") {
+			t.Errorf("expected Agent Links line in stdout, got:\n%s", stdout.String())
+		}
+		got, err := os.Readlink(filepath.Join(cloneDir, ".agents"))
+		if err != nil || got != filepath.Join("main", ".agents") {
+			t.Errorf("root .agents -> %q, want %q (err=%v)", got, filepath.Join("main", ".agents"), err)
+		}
+	})
 }
 
 func TestRunGlenCommand_Lifecycle(t *testing.T) {

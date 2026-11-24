@@ -57,6 +57,45 @@ func TestEvaluateDefaultBranchEdits(t *testing.T) {
 	}
 }
 
+func TestEvaluateDefaultBranchEditsViaSymlink(t *testing.T) {
+	root := setupWorkspace(t, "ref: refs/heads/main\n")
+
+	if err := os.MkdirAll(filepath.Join(root, "main", ".agents", "rules"), 0o755); err != nil {
+		t.Fatalf("mkdir main/.agents/rules: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main", ".agents", "rules", "sdd.md"), []byte("# sdd\n"), 0o644); err != nil {
+		t.Fatalf("write sdd.md: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("main", ".agents"), filepath.Join(root, ".agents")); err != nil {
+		t.Fatalf("symlink .agents: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("main", "AGENTS.md"), filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatalf("symlink broken AGENTS.md: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("feat", "x"), filepath.Join(root, "feat-link")); err != nil {
+		t.Fatalf("symlink feat-link: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		path     string
+		wantDeny bool
+	}{
+		{"ExistingFileViaRootAgentsSymlink", filepath.Join(root, ".agents", "rules", "sdd.md"), true},
+		{"NewFileViaRootAgentsSymlink", filepath.Join(root, ".agents", "rules", "new.md"), true},
+		{"BrokenSymlinkTargetingMain", filepath.Join(root, "AGENTS.md"), true},
+		{"SymlinkTargetingFeatureWorktree", filepath.Join(root, "feat-link", "a.go"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Evaluate(Action{Paths: []string{tt.path}})
+			if got.Deny != tt.wantDeny {
+				t.Errorf("Evaluate(%s).Deny = %v, want %v (reason: %q)", tt.path, got.Deny, tt.wantDeny, got.Reason)
+			}
+		})
+	}
+}
+
 func TestEvaluateFollowsBareHEAD(t *testing.T) {
 	root := setupWorkspace(t, "ref: refs/heads/trunk\n")
 
