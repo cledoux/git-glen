@@ -132,6 +132,12 @@ When `<target-dir>/.bare` already exists:
    ```bash
    git --git-dir=<target-dir>/.bare worktree prune --expire now
    ```
+1. Synchronize relative workspace-root symlinks
+   (`<target-dir>/<name> -> main/<name>`) for any top-level agent configuration
+   entries present in `<target-dir>/main` (`.agents`, `.claude`, `AGENTS.md`,
+   `GEMINI.md`, `CLAUDE.md`) without clobbering existing real files or valid
+   custom symlinks. `glen init` and `glen repair` perform this automatically
+   across all initialization scenarios.
 
 ### Scenario D: Legacy Sibling Layout Migration (`legacy-migrate`)
 
@@ -181,3 +187,6 @@ After running initialization or conversion, verify the workspace:
 1. `git -C <target-dir> worktree list` shows `<target-dir>/.bare` and
    `<target-dir>/main`.
 1. `git -C <target-dir>/main status` exits `0` with a clean working tree.
+1. If `<target-dir>/main` contains top-level agent config entries (`.agents`,
+   `.claude`, `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`), confirm corresponding
+   relative symlinks exist at `<target-dir>/` pointing into `main/`.

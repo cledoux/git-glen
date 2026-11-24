@@ -151,6 +151,9 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if res.VSCodeWorkspace != "" {
 		fmt.Fprintf(stdout, "VSCode File:    %s\n", res.VSCodeWorkspace)
 	}
+	if len(res.AgentLinks) > 0 {
+		fmt.Fprintf(stdout, "Agent Links:    %s\n", strings.Join(res.AgentLinks, ", "))
+	}
 	if res.Converted {
 		fmt.Fprintf(stdout, "Note:           Converted standard clone into Pure Bare topology in-place.\n")
 	} else if res.Repaired {
