@@ -96,12 +96,17 @@ func checkDefaultBranchEdit(cwd, path string) Decision {
 	}
 	path = filepath.Clean(path)
 
-	ws, ok := FindWorkspace(filepath.Dir(path))
+	resolved := resolveSymlinkPrefix(path)
+	ws, ok := FindWorkspace(filepath.Dir(resolved))
 	if !ok {
-		return Decision{}
+		ws, ok = FindWorkspace(filepath.Dir(path))
+		if !ok {
+			return Decision{}
+		}
 	}
 	protected := filepath.Join(ws.Root, filepath.FromSlash(ws.DefaultBranch))
-	if path != protected && !strings.HasPrefix(path, protected+string(filepath.Separator)) {
+	protectedResolved := resolveSymlinkPrefix(protected)
+	if !isWithin(path, protected) && !isWithin(resolved, protectedResolved) {
 		return Decision{}
 	}
 	return Decision{
@@ -110,6 +115,46 @@ func checkDefaultBranchEdit(cwd, path string) Decision {
 			"Create an isolated worktree with `glen create <branch-name>` (or the `worktree` skill) and make the change there. " +
 			"Set " + EnvAllowDefaultBranchEdits + "=1 to override deliberately.",
 	}
+}
+
+func isWithin(path, dir string) bool {
+	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
+}
+
+// resolveSymlinkPrefix resolves symlinks along the deepest existing prefix of
+// path so edits targeting a workspace-root symlink into main/ (such as
+// <root>/.agents/...) resolve to their real target even when the leaf file does
+// not yet exist.
+func resolveSymlinkPrefix(path string) string {
+	curr := filepath.Clean(path)
+	var tail []string
+	for hops := 0; hops < 16; {
+		if resolved, err := filepath.EvalSymlinks(curr); err == nil {
+			parts := make([]string, 0, 1+len(tail))
+			parts = append(parts, resolved)
+			for i := len(tail) - 1; i >= 0; i-- {
+				parts = append(parts, tail[i])
+			}
+			return filepath.Clean(filepath.Join(parts...))
+		}
+		if info, err := os.Lstat(curr); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(curr); err == nil {
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(curr), target)
+				}
+				curr = filepath.Clean(target)
+				hops++
+				continue
+			}
+		}
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			return filepath.Clean(path)
+		}
+		tail = append(tail, filepath.Base(curr))
+		curr = parent
+	}
+	return filepath.Clean(path)
 }
 
 // checkDeleteBranchMerge blocks `gh pr merge --delete-branch`, which makes gh
