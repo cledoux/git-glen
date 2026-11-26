@@ -71,6 +71,9 @@ defaults in `~/.gitconfig`):
     worktreesDir = .worktrees   # optional subdir override
     defaultBranch = main        # optional override (falls back to origin/HEAD or HEAD)
     protectMain = true          # guard direct edits on default branch (default: true)
+    autoIsolate = true          # upgrade mutating parallel spawns to workspace="share"
+                                # (default: true in initialized repos; opt-in globally for uninitialized clones)
+    readOnlyAgents =            # optional glob patterns skipped by autoIsolate
 ```
 
 Glen classifies every directory into one of three states without spawning `git`

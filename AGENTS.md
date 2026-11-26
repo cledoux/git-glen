@@ -80,7 +80,9 @@ Antigravity hook behavior (verified against agy, 2026-10):
 
 - Any JSON reply without an explicit `"allow"` (including `{}` and
   `{"decision":""}`) **denies** the tool call. Empty stdout is the only neutral
-  reply, and it leaves normal permission prompts intact.
+  reply, and it leaves normal permission prompts intact. Argument rewrites (such
+  as `autoIsolate` upgrading `Workspace` / `workspace` to `"share"`) return
+  `{"decision":"allow","overwrite":{...}}`.
 - A hook command that exits non-zero (e.g. `glen` missing) **denies every tool
   call**. Hook commands resolve `glen` from `PATH` with a
   `$HOME/.local/bin/glen` fallback and end with `|| true`; keep that wrapper.
