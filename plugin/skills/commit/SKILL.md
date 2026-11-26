@@ -47,8 +47,9 @@ ______________________________________________________________________
 
 ### Step 1: VCS Discovery & Working Copy Inspection
 
-1. Discover repository topology and VCS markers (`.bare` + `.git` + `main` Pure
-   Bare worktree topology, standard `.git` clone, `.jj`, or `.hg`).
+1. Discover repository topology and VCS markers (`bare` `.bare/` + `main/`,
+   `subdir` `.git/` + `.worktrees/`, uninitialized standard `.git/` clone,
+   `.jj`, or `.hg`).
 1. Run detailed working tree status checks inside the target worktree:
    - Git worktree: `git -C <worktree-path> status -uall` and
      `git -C <worktree-path> diff --stat`
@@ -123,11 +124,15 @@ For each planned PR:
 
 1. **Ensure Isolated Feature Worktree or Branch**:
 
-   - **Pure Bare Topology (`<root>/.bare` + `<root>/<branch-name>`)**: Ensure
-     changes reside in an isolated feature worktree at `<root>/<branch-name>`
-     (using the **`worktree`** skill or `glen create <branch-name> -C <root>`).
-   - **Standard Clone**: Branch off the appropriate base
-     (`git checkout -b <branch-name> [base-branch]`).
+   - **`bare` Layout (`<root>/.bare` + `<root>/<branch-name>`)**: Ensure changes
+     reside in an isolated feature worktree at `<root>/<branch-name>` (using the
+     **`worktree`** skill or `glen create <branch-name> -C <root>`).
+   - **`subdir` Layout (`<repo>/.git` + `<repo>/.worktrees/<branch-name>`)**:
+     Ensure changes reside in an isolated feature worktree at
+     `<repo>/.worktrees/<branch-name>` (`glen create <branch-name> -C <repo>`).
+   - **Uninitialized Standard Clone**: Either initialize `subdir` in-place
+     (`glen init --layout=subdir` + `glen create <branch-name>`) or branch off
+     the target base (`git checkout -b <branch-name> [base-branch]`).
    - Use clear, descriptive branch names (e.g., `feat/<name>`, `fix/<name>`,
      `refactor/<name>`, `docs/<name>`).
 

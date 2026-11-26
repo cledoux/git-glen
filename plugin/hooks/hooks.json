@@ -1,12 +1,12 @@
 {
-  "description": "Pure Bare guardrails: block edits in the default-branch worktree and `gh pr merge --delete-branch`; inject workflow context in Pure Bare workspaces. Requires `glen` on PATH; fails open without it.",
+  "description": "Glen worktree guardrails: block edits on the default branch in initialized workspaces and `gh pr merge --delete-branch`; inject workflow context in glen workspaces. Requires `glen` on PATH or in ~/.local/bin; fails open without it.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "command -v glen >/dev/null 2>&1 && glen hook session-start --agent=claude --context-file \"${CLAUDE_PLUGIN_ROOT}/rules/pure-bare-worktrees.md\" || true",
+            "command": "g=$(command -v glen 2>/dev/null || printf '%s/.local/bin/glen' \"$HOME\"); [ -x \"$g\" ] && \"$g\" hook session-start --agent=claude --context-file \"${CLAUDE_PLUGIN_ROOT}/rules/worktrees.md\" || true",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v glen >/dev/null 2>&1 && glen hook pre-tool-use --agent=claude || true",
+            "command": "g=$(command -v glen 2>/dev/null || printf '%s/.local/bin/glen' \"$HOME\"); [ -x \"$g\" ] && \"$g\" hook pre-tool-use --agent=claude || true",
             "timeout": 10
           }
         ]

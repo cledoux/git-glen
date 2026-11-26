@@ -11,6 +11,7 @@ import (
 
 func setupHookWorkspace(t *testing.T) string {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	root := t.TempDir()
 	for _, d := range []string{".bare", "main", "feat/x"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
@@ -199,10 +200,30 @@ func TestHookSessionStartClaude(t *testing.T) {
 		}
 	})
 
-	t.Run("SilentOutsidePureBare", func(t *testing.T) {
-		_, out, _ := runHookWith(t, args, map[string]any{"cwd": plain})
-		if out != "" {
-			t.Errorf("got %q, want empty", out)
+	t.Run("InjectsInSubdirWorkspace", func(t *testing.T) {
+		subdirRepo := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(subdirRepo, ".git"), 0o755); err != nil {
+			t.Fatalf("mkdir .git: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(subdirRepo, ".git", "config"), []byte("[glen]\n\tlayout = subdir\n"), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, out, _ := runHookWith(t, args, map[string]any{"cwd": subdirRepo})
+		if !strings.Contains(out, `"SessionStart"`) {
+			t.Errorf("expected SessionStart injection in subdir workspace, got %q", out)
+		}
+	})
+
+	t.Run("SilentInUninitializedCloneAndOutsideRepo", func(t *testing.T) {
+		uninit := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(uninit, ".git"), 0o755); err != nil {
+			t.Fatalf("mkdir .git: %v", err)
+		}
+		for _, dir := range []string{uninit, plain} {
+			_, out, _ := runHookWith(t, args, map[string]any{"cwd": dir})
+			if out != "" {
+				t.Errorf("dir=%s: got %q, want empty", dir, out)
+			}
 		}
 	})
 }

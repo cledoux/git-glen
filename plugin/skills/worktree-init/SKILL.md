@@ -8,185 +8,113 @@ description: >-
 
 # Repository Initialization & Conversion (`worktree-init`)
 
-This skill establishes, converts, migrates, or repairs a repository into a
-symmetric **Pure Bare Repository Root Topology** (`.bare/` + `.git` + `main/` +
-`<branch-name>/`) across 5 supported target scenarios.
+This skill initializes, converts, migrates, or repairs a Git repository for
+isolated worktree development using either of Glen's layouts:
+
+- **`bare` (default):** `.bare/` + `.git` (`gitdir: ./.bare`) + `main/` +
+  `<branch-name>/`
+- **`subdir` (`--layout=subdir`):** standard `.git/` clone kept in-place +
+  `.worktrees/<branch-name>/` (excluded in `.git/info/exclude`)
 
 ______________________________________________________________________
 
-## Safety Invariant: Zero-Tolerance Dirty Working Copy Guard
+## Safety Invariants
 
-Before converting a standard `.git/` clone or migrating a legacy `repo/`
-directory in-place, you MUST verify that the working tree is completely clean
-(`git status --porcelain` produces empty output).
-
-- **If any uncommitted changes, staged changes, or untracked files exist**:
-  **STOP IMMEDIATELY** and do NOT modify or restructure the directory. Instruct
-  the user to commit (`git add -A && git commit -m "WIP"`) or stash
-  (`git stash --include-untracked`) their changes first.
-- Never use destructive `--force` flags to discard uncommitted user work during
-  a topology conversion.
+- **Dirty Working Copy Guard (`bare` Conversions Only)**: Converting an existing
+  standard `.git/` clone or legacy `repo/` layout into `bare` moves working-tree
+  files into `<root>/main/` and therefore requires a completely clean working
+  tree (`git status --porcelain` empty) and zero active linked worktrees. If
+  dirty files exist, either commit/stash first **or** use
+  `glen init --layout=subdir` to initialize in-place without moving any files.
+- **Layout Preservation on Re-Init / Repair**: Running `glen init` or
+  `glen repair` without `--layout` on an already-initialized workspace preserves
+  its recorded `glen.layout` (`bare` or `subdir`) and repairs it in-place.
 
 ______________________________________________________________________
 
 ## Fast-Path Execution (`glen init`)
 
-Run `glen init` (or `git glen init`) to execute the repository-level
-initialization, conversion, migration, or repair logic. Initialization mutates
-`.bare/` and worktree metadata, so in a sandboxed terminal run it with sandbox
-escalation:
+Initialization mutates `.bare/` or `.git/` metadata, so in a sandboxed terminal
+run it with sandbox escalation:
 
 ```bash
-# Scenario A: Clone a remote repository into Pure Bare topology
-glen init git@github.com:example-org/my-project.git
-# (or specify a target parent directory with -C <dir>)
-glen init -C <parent-dir> git@github.com:example-org/my-project.git
+# Clone a remote repository (`bare` default, or `--layout=subdir`)
+glen init [--layout=bare|subdir] git@github.com:example-org/my-project.git
 
-# Scenario B / C / D / E: Convert, repair, migrate, or init a local directory
-glen init [target-dir]
+# Initialize, convert, migrate, or repair a local directory
+glen init [target-dir]                   # bare layout (or repairs existing layout)
+glen init --layout=subdir [target-dir]   # subdir layout in-place (works on dirty clones)
 
 # Optional: Create or update <root>/<repo>.code-workspace with active worktree folders
-# (Once created, glen create/remove/prune/init automatically keep its "folders" array in sync)
-glen init --vscode [target-dir-or-url]
+glen init [--layout=bare|subdir] --vscode [target-dir-or-url]
+```
+
+To prefer `subdir` globally whenever `--layout` is omitted, set:
+
+```bash
+git config --global glen.defaultLayout subdir
 ```
 
 ______________________________________________________________________
 
-## The 5 Initialization Scenarios
+## Initialization Scenarios
 
-### Scenario A: Remote Git URL (`remote-clone`)
+### Remote Git URL (`remote-clone`)
 
-When given a remote URL (`git@...`, `https://...`, `ssh://...`):
+- **`bare` (default):** Clones `--bare` into `<target>/.bare`, writes
+  `gitdir: ./.bare` to `<target>/.git`, configures `glen.layout = bare` and
+  per-worktree `core.bare`, attaches `<target>/<default-branch>`, and symlinks
+  top-level agent configs (`.agents`, `.claude`, `AGENTS.md`, `GEMINI.md`,
+  `CLAUDE.md`) at `<target>/`.
+- **`subdir` (`--layout=subdir`):** Clones normally into `<target>`, configures
+  `glen.layout = subdir` and `extensions.worktreeConfig = true`, creates
+  `<target>/.worktrees`, and adds `/.worktrees/` to
+  `<target>/.git/info/exclude`.
 
-1. Clone bare database and write root `.git` pointer:
-   ```bash
-   git clone --bare <repo-url> <target-dir>/.bare
-   echo "gitdir: ./.bare" > <target-dir>/.git
-   ```
-1. Configure per-worktree config isolation (`core.bare = true` in
-   `.bare/config.worktree` and removed from shared `.bare/config`), mandatory
-   fetch refspec, and default bare ergonomics:
-   ```bash
-   git --git-dir=<target-dir>/.bare config extensions.worktreeConfig true
-   git --git-dir=<target-dir>/.bare config --unset-all core.bare || true
-   git --git-dir=<target-dir>/.bare config --worktree core.bare true
-   git --git-dir=<target-dir>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-   git --git-dir=<target-dir>/.bare config push.autoSetupRemote true
-   git --git-dir=<target-dir>/.bare config branch.autoSetupMerge simple
-   git --git-dir=<target-dir>/.bare config fetch.prune true
-   git --git-dir=<target-dir>/.bare config worktree.guessRemote true
-   ```
-1. Dynamically probe the remote default branch (`main`, `master`, `trunk`) via
-   `git --git-dir=<target-dir>/.bare symbolic-ref refs/remotes/origin/HEAD`.
-1. Attach primary `<target-dir>/main` worktree and configure upstream tracking:
-   ```bash
-   git --git-dir=<target-dir>/.bare worktree add <target-dir>/main origin/<default-branch>
-   git -C <target-dir>/main config --worktree core.bare false
-   git -C <target-dir>/main branch --set-upstream-to=origin/<default-branch> <default-branch>
-   ```
+### Existing Standard `.git/` Clone (`clone-convert` / `subdir-init` / `subdir-repair`)
 
-### Scenario B: Standard `.git` Clone In-Place Conversion (`clone-convert`)
+- **`bare` (`glen init <dir>` on unconfigured clean clone):** Verifies zero
+  linked worktrees and clean `git status --porcelain`, moves `.git` to `.bare`,
+  writes root `.git` pointer, attaches `<dir>/<branch>`, and syncs root agent
+  config symlinks.
+- **`subdir` (`glen init --layout=subdir <dir>`, or `glen init <dir>` when
+  `glen.layout = subdir` is already set):** Leaves all working files untouched
+  (safe on dirty trees), repairs worktree pointers, sets `glen.layout = subdir`
+  and ergonomic Git defaults, creates `.worktrees/`, adds `/.worktrees/` to
+  `.git/info/exclude`, and prunes stale locks.
 
-When `<target-dir>/.git` is a standard clone directory:
+### Existing `bare` Workspace Repair (`bare-repair`)
 
-1. **Mandatory Cleanliness Check**: Run
-   `git -C <target-dir> status --porcelain`. Abort if non-empty.
-1. Resolve active branch (`git -C <target-dir> rev-parse --abbrev-ref HEAD`).
-1. Move `<target-dir>/.git` to `<target-dir>/.bare` and configure bare settings:
-   ```bash
-   mv <target-dir>/.git <target-dir>/.bare
-   git --git-dir=<target-dir>/.bare config extensions.worktreeConfig true
-   git --git-dir=<target-dir>/.bare config --unset-all core.bare || true
-   git --git-dir=<target-dir>/.bare config --worktree core.bare true
-   git --git-dir=<target-dir>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-   git --git-dir=<target-dir>/.bare config push.autoSetupRemote true
-   git --git-dir=<target-dir>/.bare config branch.autoSetupMerge simple
-   git --git-dir=<target-dir>/.bare config fetch.prune true
-   git --git-dir=<target-dir>/.bare config worktree.guessRemote true
-   ```
-1. Remove clean root working files (preserving `.bare`), write the root `.git`
-   pointer (`echo "gitdir: ./.bare" > <target-dir>/.git`), and attach
-   `<target-dir>/main`:
-   ```bash
-   echo "gitdir: ./.bare" > <target-dir>/.git
-   git --git-dir=<target-dir>/.bare worktree add <target-dir>/main <branch>
-   git -C <target-dir>/main config --worktree core.bare false
-   ```
+When `<target>/.bare` exists: restores `<target>/.git` (`gitdir: ./.bare`), runs
+`git worktree repair`, enforces `glen.layout = bare`,
+`extensions.worktreeConfig`, per-worktree `core.bare`, and
+`remote.origin.fetch`, prunes expired locks, and refreshes root agent symlinks
+and any existing `.code-workspace` file.
 
-### Scenario C: Existing Pure Bare Repair (`bare-repair`)
+### Legacy Sibling Layout Migration (`legacy-migrate`)
 
-When `<target-dir>/.bare` already exists:
+When `<target>/repo/.git` exists: verifies `<target>/repo` is clean, migrates
+`repo/.git` to `<target>/.bare` (`glen.layout = bare`), attaches
+`<target>/main`, prunes stale metadata, and syncs root agent links.
 
-1. Ensure `<target-dir>/.git` contains `gitdir: ./.bare`.
-1. Heal relative or relocated worktree pointers:
-   ```bash
-   git -C <target-dir>/main worktree repair
-   git --git-dir=<target-dir>/.bare worktree repair
-   ```
-1. Enforce `extensions.worktreeConfig = true`, unset `core.bare` from shared
-   `.bare/config`, set `core.bare = true` in `.bare/config.worktree`, and
-   enforce `remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*`,
-   `push.autoSetupRemote = true`, `branch.autoSetupMerge = simple`,
-   `fetch.prune = true`, and `worktree.guessRemote = true`.
-1. Prune expired worktree locks and dangling metadata:
-   ```bash
-   git --git-dir=<target-dir>/.bare worktree prune --expire now
-   ```
-1. Synchronize relative workspace-root symlinks
-   (`<target-dir>/<name> -> main/<name>`) for any top-level agent configuration
-   entries present in `<target-dir>/main` (`.agents`, `.claude`, `AGENTS.md`,
-   `GEMINI.md`, `CLAUDE.md`) without clobbering existing real files or valid
-   custom symlinks. `glen init` and `glen repair` perform this automatically
-   across all initialization scenarios.
+### Greenfield Directory (`greenfield`)
 
-### Scenario D: Legacy Sibling Layout Migration (`legacy-migrate`)
-
-When `<target-dir>/repo/.git` exists:
-
-1. **Mandatory Cleanliness Check**: Run
-   `git -C <target-dir>/repo status --porcelain`. Abort if non-empty.
-1. Resolve active branch in `<target-dir>/repo`.
-1. Move `<target-dir>/repo/.git` to `<target-dir>/.bare`, enable
-   `extensions.worktreeConfig = true`, unset shared `core.bare`, set
-   `core.bare = true` in `.bare/config.worktree`, configure bare defaults,
-   remove `<target-dir>/repo`, and write
-   `echo "gitdir: ./.bare" > <target-dir>/.git`.
-1. Attach `<target-dir>/main`, set `core.bare = false` on `main`, and run
-   `worktree prune --expire now`.
-
-### Scenario E: Greenfield Empty Directory (`greenfield`)
-
-When `<target-dir>` does not exist or is empty:
-
-1. Initialize bare database, write `<target-dir>/.git`, and configure bare
-   defaults:
-   ```bash
-   mkdir -p <target-dir>
-   git init --bare -b main <target-dir>/.bare
-   echo "gitdir: ./.bare" > <target-dir>/.git
-   git --git-dir=<target-dir>/.bare config extensions.worktreeConfig true
-   git --git-dir=<target-dir>/.bare config --unset-all core.bare || true
-   git --git-dir=<target-dir>/.bare config --worktree core.bare true
-   ```
-1. Provision `<target-dir>/main`, set `core.bare = false`, and create an initial
-   `README.md` commit.
+When `<target>` does not exist or is empty: initializes either a `bare`
+workspace (`.bare/` + `.git` + `main/` + initial commit) or, with
+`--layout=subdir`, a standard clone (`.git/` + `.worktrees/` +
+`.git/info/exclude` + initial commit).
 
 ______________________________________________________________________
 
 ## Verification Steps
 
-After running initialization or conversion, verify the workspace:
+After running `glen init` or `glen repair`:
 
-1. `cat <target-dir>/.git` returns `gitdir: ./.bare`.
-1. `git --git-dir=<target-dir>/.bare config --get-all remote.origin.fetch`
-   includes `+refs/heads/*:refs/remotes/origin/*`.
-1. `git --git-dir=<target-dir>/.bare config --get extensions.worktreeConfig`
-   returns `true`.
-1. `git --git-dir=<target-dir>/.bare config --worktree --get core.bare` returns
-   `true` (and `.bare/config` does not contain `bare = true`).
-1. `git -C <target-dir> worktree list` shows `<target-dir>/.bare` and
-   `<target-dir>/main`.
-1. `git -C <target-dir>/main status` exits `0` with a clean working tree.
-1. If `<target-dir>/main` contains top-level agent config entries (`.agents`,
-   `.claude`, `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`), confirm corresponding
-   relative symlinks exist at `<target-dir>/` pointing into `main/`.
+1. Run `glen list -C <target-dir>` and confirm `Layout:` reports `bare` or
+   `subdir` (not `uninitialized`).
+1. For **`bare`**: confirm `<target-dir>/.git` contains `gitdir: ./.bare`,
+   `git --git-dir=<target-dir>/.bare config --get glen.layout` returns `bare`,
+   and `git -C <target-dir>/main status` is clean.
+1. For **`subdir`**: confirm `git -C <target-dir> config --get glen.layout`
+   returns `subdir`, `<target-dir>/.git/info/exclude` contains `/.worktrees/`,
+   and `git -C <target-dir> status --porcelain` does not show `.worktrees/`.

@@ -28,11 +28,12 @@ directly so `/prime` remains useful even when downstream plugins retire their
      priming is running and continue directly to Step 2.
 1. **Built-In Repository Context Discovery** *(when no downstream `*prime` skill
    ran)*:
-   - Discover the repository layout (Pure Bare `.bare/` + `main/` vs. standard
-     clone) and inspect top-level instructions, rules, and project manifests
-     inside the primary checkout (`AGENTS.md`, `GEMINI.md`, `CLAUDE.md`,
-     `README.md`, `.agents/rules/`, `Justfile`, `Makefile`, `pyproject.toml`,
-     `go.mod`, `package.json`, `castor_config.txtpb`).
+   - Discover the repository layout (`bare` `.bare/` + `main/`, `subdir` `.git/`
+     - `.worktrees/`, or uninitialized standard clone) and inspect top-level
+       instructions, rules, and project manifests inside the primary checkout
+       (`AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, `README.md`, `.agents/rules/`,
+       `Justfile`, `Makefile`, `pyproject.toml`, `go.mod`, `package.json`,
+       `castor_config.txtpb`).
    - If specification or ADR indices exist (e.g.,
      `docs/openspec/specs/index.md`, `docs/adr/index.md`, `g3doc/SITEMAP.md`),
      read the index to understand governed components and architecture

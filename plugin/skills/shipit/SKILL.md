@@ -18,8 +18,8 @@ ______________________________________________________________________
 
 ### Step 1: VCS Discovery & Working Copy Inspection
 
-1. Discover repository topology and VCS markers (`.bare` + `.git` + `main` Pure
-   Bare topology, standard `.git` clone, `.jj`, or `.hg`).
+1. Discover repository topology and VCS markers (`bare` `.bare/` + `main/`,
+   `subdir` `.git/` + `.worktrees/`, standard `.git/` clone, `.jj`, or `.hg`).
 1. Run working tree status checks:
    - `git -C <worktree-path> status -uall` and
      `git -C <worktree-path> diff --stat`
@@ -75,24 +75,26 @@ ______________________________________________________________________
 ### Step 5: Fast-Path Merge & Direct Push
 
 State-changing Git commands (`add`, `commit`, `pull`, `merge`, `push`,
-`worktree remove`, `branch -d`) write to `.bare/`; if a terminal sandbox rejects
-them, re-run with sandbox escalation:
+`worktree remove`, `branch -d`) write to `.bare/` or `.git/`; if a terminal
+sandbox rejects them, re-run with sandbox escalation:
 
 1. **If on `main` (`<root>/main` or standard clone)**:
    - Stage target files: `git -C <main-path> add ...`
    - Commit directly: `git -C <main-path> commit -m "..."`
    - Push to remote: `git -C <main-path> push origin main`
-1. **If in an isolated feature worktree (`<root>/<branch-name>`)**:
-   - Stage and commit the changes inside `<root>/<branch-name>`.
-   - Fast-forward `<root>/main` from remote and merge the feature branch:
+1. **If in an isolated feature worktree (`<root>/<branch-name>` in `bare` or
+   `<repo>/.worktrees/<branch-name>` in `subdir`)**:
+   - Stage and commit the changes inside `<worktree-path>`.
+   - Fast-forward the default-branch checkout (`<root>/main` in `bare`, or
+     `<repo>` in `subdir`) from remote and merge the feature branch:
      ```bash
-     git -C <root>/main pull --ff-only origin main
-     git -C <root>/main merge --ff-only <branch-name>
-     git -C <root>/main push origin main
+     git -C <default-worktree> pull --ff-only origin main
+     git -C <default-worktree> merge --ff-only <branch-name>
+     git -C <default-worktree> push origin main
      ```
    - Clean up the feature worktree and local branch:
      ```bash
-     glen remove <branch-name> -C <root>
+     glen remove <branch-name> -C <workspace-root>
      ```
 1. **If on a feature branch in a standard single-worktree clone**:
    - Commit the changes on the branch.
@@ -108,11 +110,11 @@ them, re-run with sandbox escalation:
      `remote: error: GH013: Repository rule violations found`), do **not**
      attempt to bypass rules or leave changes unpushed.
    - Instead, automatically fall back to the branch-based PR workflow: create a
-     feature worktree/branch (`glen create <branch-name>` in a Pure Bare repo,
-     or `git switch -c <branch-name>` in a standard clone), move/cherry-pick the
-     commit onto that feature branch, reset the local default branch back to
-     `origin/<default-branch>`, and open a pull request using the **`commit`**
-     skill (`../commit/SKILL.md`).
+     feature worktree/branch (`glen create <branch-name>` in a `glen` workspace,
+     or `git switch -c <branch-name>` in an uninitialized clone),
+     move/cherry-pick the commit onto that feature branch, reset the local
+     default branch back to `origin/<default-branch>`, and open a pull request
+     using the **`commit`** skill (`../commit/SKILL.md`).
 
 ______________________________________________________________________
 
