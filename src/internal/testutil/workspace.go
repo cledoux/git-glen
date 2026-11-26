@@ -22,11 +22,15 @@ func RunGit(t *testing.T, dir string, args ...string) string {
 
 // isBareRepo checks if dir is a bare git directory without .git.
 func isBareRepo(dir string) bool {
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+	clean := filepath.Clean(dir)
+	if filepath.Base(clean) == ".git" {
 		return false
 	}
-	head := filepath.Join(dir, "HEAD")
-	cfg := filepath.Join(dir, "config")
+	if _, err := os.Stat(filepath.Join(clean, ".git")); err == nil {
+		return false
+	}
+	head := filepath.Join(clean, "HEAD")
+	cfg := filepath.Join(clean, "config")
 	_, errHead := os.Stat(head)
 	_, errCfg := os.Stat(cfg)
 	return errHead == nil && errCfg == nil

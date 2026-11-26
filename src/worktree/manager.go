@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"git-glen/internal/gitcfg"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -32,16 +34,37 @@ type WorktreeInfo struct {
 	Bare   bool
 }
 
-// IsBareRepo checks if a path is a bare Git repository.
+// IsBareRepo checks if a path is a bare Git repository (and not a standard clone's .git directory).
 func IsBareRepo(dir string) bool {
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+	clean := filepath.Clean(dir)
+	if filepath.Base(clean) == ".git" {
 		return false
 	}
-	head := filepath.Join(dir, "HEAD")
-	cfg := filepath.Join(dir, "config")
+	if _, err := os.Stat(filepath.Join(clean, ".git")); err == nil {
+		return false
+	}
+	head := filepath.Join(clean, "HEAD")
+	cfg := filepath.Join(clean, "config")
 	_, errHead := os.Stat(head)
 	_, errCfg := os.Stat(cfg)
 	return errHead == nil && errCfg == nil
+}
+
+func (m *Manager) resolveRepoConfig() (gitcfg.Repo, gitcfg.Config) {
+	if m.RepoDir == "" {
+		return gitcfg.Repo{}, gitcfg.LoadGlobal()
+	}
+	target := filepath.Clean(m.RepoDir)
+	if filepath.Base(target) == ".git" {
+		if info, err := os.Stat(target); err == nil && info.IsDir() {
+			target = filepath.Dir(target)
+		}
+	}
+	repo, ok := gitcfg.Discover(target)
+	if !ok {
+		return gitcfg.Repo{BaseDir: target, CommonDir: m.RepoDir, GitDir: m.RepoDir}, gitcfg.LoadGlobal()
+	}
+	return repo, gitcfg.Load(repo)
 }
 
 // runGit executes a git command in the repo directory with a timeout.
@@ -54,8 +77,14 @@ func (m *Manager) runGit(ctx context.Context, dir string, args ...string) (strin
 		cmd = exec.CommandContext(ctx, "git", append([]string{"--git-dir=" + m.RepoDir}, args...)...)
 		cmd.Dir = m.RepoDir
 	} else {
+		execDir := dir
+		if filepath.Base(execDir) == ".git" {
+			if info, err := os.Stat(execDir); err == nil && info.IsDir() {
+				execDir = filepath.Dir(execDir)
+			}
+		}
 		cmd = exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = dir
+		cmd.Dir = execDir
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -81,7 +110,7 @@ func (m *Manager) EnsureWorktreeConfig(ctx context.Context) error {
 }
 
 // EnsureRootGitPointer writes the root .git pointer file ("gitdir: ./.bare\n") so
-// Git commands and IDEs recognize the Pure Bare workspace root as a Git repository.
+// Git commands and IDEs recognize the bare workspace root as a Git repository.
 func EnsureRootGitPointer(rootDir string) error {
 	gitFile := filepath.Join(rootDir, ".git")
 	if info, err := os.Stat(gitFile); err == nil && info.IsDir() {
@@ -93,11 +122,45 @@ func EnsureRootGitPointer(rootDir string) error {
 	return nil
 }
 
+func (m *Manager) applyErgonomicGitDefaults(ctx context.Context, ensureOriginRefspec bool) error {
+	if ensureOriginRefspec {
+		existing, _ := m.runGit(ctx, m.RepoDir, "config", "--get-all", "remote.origin.fetch")
+		expectedRefspec := "+refs/heads/*:refs/remotes/origin/*"
+		hasRefspec := false
+		for _, line := range strings.Split(existing, "\n") {
+			if strings.TrimSpace(line) == expectedRefspec {
+				hasRefspec = true
+				break
+			}
+		}
+		if !hasRefspec {
+			if _, err := m.runGit(ctx, m.RepoDir, "config", "remote.origin.fetch", expectedRefspec); err != nil {
+				return fmt.Errorf("failed to set remote.origin.fetch: %w", err)
+			}
+		}
+	}
+
+	defaultConfigs := []struct {
+		key string
+		val string
+	}{
+		{"push.autoSetupRemote", "true"},
+		{"branch.autoSetupMerge", "simple"},
+		{"fetch.prune", "true"},
+		{"worktree.guessRemote", "true"},
+	}
+	for _, kv := range defaultConfigs {
+		if _, err := m.runGit(ctx, m.RepoDir, "config", kv.key, kv.val); err != nil {
+			return fmt.Errorf("failed to set %s=%s: %w", kv.key, kv.val, err)
+		}
+	}
+	return nil
+}
+
 // Governing: SPEC-0001, ADR-0003, REQ-0003
-// EnsureBareRepoConfig ensures extensions.worktreeConfig, per-worktree core.bare=true in
-// .bare/config.worktree (with core.bare removed from shared .bare/config), remote.origin.fetch
-// refspec, and ergonomic bare worktree defaults (push.autoSetupRemote, branch.autoSetupMerge,
-// fetch.prune, worktree.guessRemote) are configured for a bare repository.
+// EnsureBareRepoConfig ensures extensions.worktreeConfig, glen.layout=bare, per-worktree
+// core.bare=true in .bare/config.worktree (with core.bare removed from shared .bare/config),
+// remote.origin.fetch refspec, and ergonomic worktree defaults are configured for a bare repository.
 func (m *Manager) EnsureBareRepoConfig(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
@@ -121,38 +184,54 @@ func (m *Manager) EnsureBareRepoConfig(ctx context.Context) error {
 		return fmt.Errorf("failed to set worktree core.bare=true: %w", err)
 	}
 
-	// Check existing remote.origin.fetch refspecs
-	existing, _ := m.runGit(ctx, m.RepoDir, "config", "--get-all", "remote.origin.fetch")
-	expectedRefspec := "+refs/heads/*:refs/remotes/origin/*"
-	hasRefspec := false
-	for _, line := range strings.Split(existing, "\n") {
-		if strings.TrimSpace(line) == expectedRefspec {
-			hasRefspec = true
-			break
-		}
+	// 4. Record glen.layout=bare in shared .bare/config
+	if _, err := m.runGit(ctx, m.RepoDir, "config", "glen.layout", string(LayoutBare)); err != nil {
+		return fmt.Errorf("failed to set glen.layout=bare: %w", err)
 	}
 
-	if !hasRefspec {
-		if _, err := m.runGit(ctx, m.RepoDir, "config", "remote.origin.fetch", expectedRefspec); err != nil {
-			return fmt.Errorf("failed to set remote.origin.fetch: %w", err)
-		}
+	return m.applyErgonomicGitDefaults(ctx, true)
+}
+
+// EnsureSubdirRepoConfig configures a standard clone for the subdir worktree layout:
+// enables extensions.worktreeConfig, records glen.layout=subdir (and optional glen.worktreesDir),
+// applies ergonomic Git worktree defaults, and registers the worktrees directory in .git/info/exclude.
+func (m *Manager) EnsureSubdirRepoConfig(ctx context.Context, worktreesDir string) error {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+
+	if err := m.EnsureWorktreeConfig(ctx); err != nil {
+		return err
 	}
 
-	defaultConfigs := []struct {
-		key string
-		val string
-	}{
-		{"push.autoSetupRemote", "true"},
-		{"branch.autoSetupMerge", "simple"},
-		{"fetch.prune", "true"},
-		{"worktree.guessRemote", "true"},
-	}
-	for _, kv := range defaultConfigs {
-		if _, err := m.runGit(ctx, m.RepoDir, "config", kv.key, kv.val); err != nil {
-			return fmt.Errorf("failed to set %s=%s: %w", kv.key, kv.val, err)
-		}
+	if _, err := m.runGit(ctx, m.RepoDir, "config", "glen.layout", string(LayoutSubdir)); err != nil {
+		return fmt.Errorf("failed to set glen.layout=subdir: %w", err)
 	}
 
+	repo, cfg := m.resolveRepoConfig()
+	effectiveWTDir := strings.TrimSpace(worktreesDir)
+	if effectiveWTDir != "" {
+		if _, err := m.runGit(ctx, m.RepoDir, "config", "glen.worktreesDir", effectiveWTDir); err != nil {
+			return fmt.Errorf("failed to set glen.worktreesDir: %w", err)
+		}
+	} else {
+		effectiveWTDir = cfg.WorktreesDir
+	}
+
+	hasOrigin := false
+	if url, err := m.runGit(ctx, m.RepoDir, "config", "--get", "remote.origin.url"); err == nil && strings.TrimSpace(url) != "" {
+		hasOrigin = true
+	}
+	if err := m.applyErgonomicGitDefaults(ctx, hasOrigin); err != nil {
+		return err
+	}
+
+	strat := registeredLayouts[LayoutSubdir]
+	wtRoot := strat.worktreesRoot(repo.BaseDir, effectiveWTDir)
+	if pattern := strat.excludePattern(repo.BaseDir, wtRoot); pattern != "" && repo.CommonDir != "" {
+		if err := gitcfg.EnsureInfoExclude(repo.CommonDir, pattern); err != nil {
+			return fmt.Errorf("failed to update %s/info/exclude: %w", repo.CommonDir, err)
+		}
+	}
 	return nil
 }
 
@@ -166,9 +245,7 @@ func (m *Manager) PruneWorktrees(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to prune worktrees: %w", err)
 	}
-	if IsBareRepo(m.RepoDir) {
-		_, _ = m.SyncVSCodeWorkspace(ctx, false)
-	}
+	_, _ = m.SyncVSCodeWorkspace(ctx, false)
 	return nil
 }
 
@@ -188,9 +265,9 @@ func (m *Manager) FetchRemote(ctx context.Context, remote string) error {
 }
 
 // Governing: SPEC-0001, ADR-0003, REQ-0003, REQ-0004
-// CreateWorktree creates an isolated worktree at <root>/<branch-name> (for Pure Bare repositories)
-// or worktrees/<branch-slug> (for legacy non-bare setups) and configures core.bare=false and
-// optional per-worktree author identity.
+// CreateWorktree creates an isolated worktree according to the repository's configured layout
+// (<root>/<branch-name> for bare, <repo>/.worktrees/<branch-name> for subdir, or legacy sibling
+// fallback when unconfigured) and configures optional per-worktree author identity.
 func (m *Manager) CreateWorktree(ctx context.Context, branchName, baseBranch, agentName, agentEmail string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
@@ -201,16 +278,26 @@ func (m *Manager) CreateWorktree(ctx context.Context, branchName, baseBranch, ag
 	}
 
 	isBare := IsBareRepo(m.RepoDir)
+	repo, cfg := m.resolveRepoConfig()
+
 	var worktreeDir string
-	if isBare {
+	switch {
+	case isBare || cfg.Layout == string(LayoutBare):
 		if err := m.EnsureBareRepoConfig(ctx); err != nil {
 			return "", "", err
 		}
 		rootDir := filepath.Clean(filepath.Join(m.RepoDir, ".."))
 		_ = EnsureRootGitPointer(rootDir)
-		cleanBranch := strings.Trim(strings.ReplaceAll(branchName, " ", "-"), "/")
-		worktreeDir = filepath.Clean(filepath.Join(rootDir, filepath.FromSlash(cleanBranch)))
-	} else {
+		strat := registeredLayouts[LayoutBare]
+		worktreeDir = strat.worktreePath(strat.worktreesRoot(rootDir, ""), branchName)
+	case cfg.Layout == string(LayoutSubdir):
+		if err := m.EnsureSubdirRepoConfig(ctx, ""); err != nil {
+			return "", "", err
+		}
+		strat := registeredLayouts[LayoutSubdir]
+		wtRoot := strat.worktreesRoot(repo.BaseDir, cfg.WorktreesDir)
+		worktreeDir = strat.worktreePath(wtRoot, branchName)
+	default:
 		if err := m.EnsureWorktreeConfig(ctx); err != nil {
 			return "", "", err
 		}
@@ -222,16 +309,27 @@ func (m *Manager) CreateWorktree(ctx context.Context, branchName, baseBranch, ag
 		return "", "", fmt.Errorf("failed to create worktree parent directory: %w", err)
 	}
 
-	if baseBranch == "" {
-		baseBranch = "origin/main"
+	defBranch := cfg.DefaultBranch
+	if defBranch == "" {
+		defBranch = "main"
 	}
+	defaultBase := baseBranch == ""
+	if defaultBase {
+		baseBranch = "origin/" + defBranch
+	}
+
 	_, err := m.runGit(ctx, m.RepoDir, "worktree", "add", worktreeDir, "-b", branchName, baseBranch)
-	if err != nil {
-		// Fallback to local default branch or HEAD if remote branch is not available
-		if baseBranch == "origin/main" {
+	if err != nil && defaultBase {
+		// Fallback to local default branch or HEAD if remote tracking branch is not available
+		if _, errDef := m.runGit(ctx, m.RepoDir, "worktree", "add", worktreeDir, "-b", branchName, defBranch); errDef == nil {
+			err = nil
+		} else if defBranch != "main" {
 			if _, errMain := m.runGit(ctx, m.RepoDir, "worktree", "add", worktreeDir, "-b", branchName, "main"); errMain == nil {
 				err = nil
-			} else if _, errHead := m.runGit(ctx, m.RepoDir, "worktree", "add", worktreeDir, "-b", branchName, "HEAD"); errHead == nil {
+			}
+		}
+		if err != nil {
+			if _, errHead := m.runGit(ctx, m.RepoDir, "worktree", "add", worktreeDir, "-b", branchName, "HEAD"); errHead == nil {
 				err = nil
 			}
 		}
@@ -245,7 +343,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, branchName, baseBranch, ag
 	}
 
 	// When attached to a bare repository database, configure the worktree as non-bare
-	if isBare {
+	if isBare || cfg.Layout == string(LayoutBare) {
 		if _, err := m.runGit(ctx, worktreeDir, "config", "--worktree", "core.bare", "false"); err != nil {
 			_ = os.RemoveAll(worktreeDir)
 			return "", "", fmt.Errorf("failed to configure worktree core.bare: %w", err)
@@ -264,9 +362,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, branchName, baseBranch, ag
 		}
 	}
 
-	if isBare {
-		_, _ = m.SyncVSCodeWorkspace(ctx, false)
-	}
+	_, _ = m.SyncVSCodeWorkspace(ctx, false)
 
 	return worktreeDir, branchName, nil
 }
@@ -289,6 +385,9 @@ func (m *Manager) RemoveFeatureWorktree(ctx context.Context, worktreeDir, branch
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
+	isBare := IsBareRepo(m.RepoDir)
+	repo, cfg := m.resolveRepoConfig()
+
 	// Remove worktree
 	_, err := m.runGit(ctx, m.RepoDir, "worktree", "remove", "--force", worktreeDir)
 	if err != nil {
@@ -298,18 +397,24 @@ func (m *Manager) RemoveFeatureWorktree(ctx context.Context, worktreeDir, branch
 	// Defensively prune stale metadata and recover locks
 	_ = m.PruneWorktrees(ctx)
 
-	// Clean up empty intermediate branch directories (e.g., <root>/feat/) in Pure Bare workspaces
-	if IsBareRepo(m.RepoDir) {
-		rootDir := filepath.Clean(filepath.Join(m.RepoDir, ".."))
+	// Clean up empty intermediate branch directories (e.g., <wtRoot>/feat/) up to the worktrees root.
+	var stopDir string
+	switch {
+	case isBare || cfg.Layout == string(LayoutBare):
+		stopDir = filepath.Clean(filepath.Join(m.RepoDir, ".."))
+	case cfg.Layout == string(LayoutSubdir):
+		stopDir = registeredLayouts[LayoutSubdir].worktreesRoot(repo.BaseDir, cfg.WorktreesDir)
+	}
+	if stopDir != "" {
 		parent := filepath.Dir(filepath.Clean(worktreeDir))
-		for parent != rootDir && parent != "." && parent != string(filepath.Separator) && strings.HasPrefix(parent, rootDir+string(filepath.Separator)) {
+		for parent != stopDir && parent != "." && parent != string(filepath.Separator) && strings.HasPrefix(parent, stopDir+string(filepath.Separator)) {
 			if err := os.Remove(parent); err != nil {
 				break
 			}
 			parent = filepath.Dir(parent)
 		}
-		_, _ = m.SyncVSCodeWorkspace(ctx, false)
 	}
+	_, _ = m.SyncVSCodeWorkspace(ctx, false)
 
 	// Delete local feature branch
 	if branchName != "" {

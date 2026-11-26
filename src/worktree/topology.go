@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"git-glen/internal/gitcfg"
 )
 
 const gitConfigTimeout = 5 * time.Second
@@ -16,6 +18,8 @@ const gitConfigTimeout = 5 * time.Second
 // Topology describes the discovered Git repository and worktree directory structure.
 type Topology struct {
 	Name            string `json:"name"`
+	Layout          Layout `json:"layout,omitempty"`
+	Initialized     bool   `json:"initialized"`
 	BaseDir         string `json:"base_dir"`
 	RepoURL         string `json:"repo_url,omitempty"`
 	BareDir         string `json:"bare_dir,omitempty"`
@@ -27,7 +31,7 @@ type Topology struct {
 }
 
 // DiscoverTopology traverses upward from Cwd (or changeDir override) to discover the
-// enclosing Git repository topology (Pure Bare, standard clone, linked worktree, or legacy sibling).
+// enclosing Git repository topology (bare, subdir, uninitialized standard clone, or legacy sibling).
 func DiscoverTopology(cwd, changeDir string) (*Topology, error) {
 	effectiveCwd := cwd
 	if changeDir != "" {
@@ -59,51 +63,54 @@ func DiscoverTopology(cwd, changeDir string) (*Topology, error) {
 }
 
 func discoverTopologyFromDir(startDir string) (*Topology, error) {
+	// Check for Legacy Sibling layout first (<root>/repo/.git + <root>/worktrees/)
+	if rootDir, ok := findLegacySiblingRoot(startDir); ok {
+		return buildLegacySiblingTopology(rootDir, startDir)
+	}
+
+	repo, ok := gitcfg.Discover(startDir)
+	if !ok {
+		return nil, fmt.Errorf("unable to discover Git repository topology from '%s'", startDir)
+	}
+
+	cfg := gitcfg.Load(repo)
+	if cfg.State == gitcfg.StateConfigured && cfg.Layout != "" {
+		if _, err := ParseLayout(cfg.Layout); err != nil {
+			return nil, fmt.Errorf("invalid glen.layout in %s/config: %w", repo.CommonDir, err)
+		}
+	}
+
+	if cfg.Layout == string(LayoutBare) {
+		return buildBareTopology(repo.BaseDir, startDir)
+	}
+
+	return buildCloneTopology(repo, cfg)
+}
+
+func findLegacySiblingRoot(startDir string) (string, bool) {
 	curr := startDir
 	for {
-		// 1. Check for Pure Bare root (.bare directory)
-		barePath := filepath.Join(curr, ".bare")
-		if info, err := os.Stat(barePath); err == nil && info.IsDir() {
-			return buildPureBareTopology(curr, startDir)
-		}
-
-		// 2. Check for Legacy Sibling root (curr contains repo/ + worktrees/)
 		legacyRepoPath := filepath.Join(curr, "repo", ".git")
 		legacyWTPath := filepath.Join(curr, "worktrees")
 		if _, errRepo := os.Stat(legacyRepoPath); errRepo == nil {
 			if infoWT, errWT := os.Stat(legacyWTPath); errWT == nil && infoWT.IsDir() {
-				return buildLegacySiblingTopology(curr, startDir)
-			}
-		}
-
-		// 3. Check for .git (directory or worktree pointer file)
-		gitPath := filepath.Join(curr, ".git")
-		if info, err := os.Stat(gitPath); err == nil {
-			if info.IsDir() {
-				parent := filepath.Dir(curr)
-				parentWT := filepath.Join(parent, "worktrees")
-				if filepath.Base(curr) == "repo" {
-					if infoPWT, errPWT := os.Stat(parentWT); errPWT == nil && infoPWT.IsDir() {
-						return buildLegacySiblingTopology(parent, startDir)
+				// Distinguish legacy sibling from a subdir repo that happens to contain repo/
+				if _, errBare := os.Stat(filepath.Join(curr, ".bare")); errBare != nil {
+					if _, errGit := os.Stat(filepath.Join(curr, ".git")); errGit != nil {
+						return curr, true
 					}
 				}
-				return buildStandardCloneTopology(curr)
 			}
-
-			return buildWorktreePointerTopology(curr, startDir)
 		}
-
 		parent := filepath.Dir(curr)
 		if parent == curr {
-			break
+			return "", false
 		}
 		curr = parent
 	}
-
-	return nil, fmt.Errorf("unable to discover Git repository topology from '%s'", startDir)
 }
 
-func buildPureBareTopology(rootDir, startDir string) (*Topology, error) {
+func buildBareTopology(rootDir, startDir string) (*Topology, error) {
 	bareDir := filepath.Join(rootDir, ".bare")
 
 	currentWT := ""
@@ -129,6 +136,8 @@ func buildPureBareTopology(rootDir, startDir string) (*Topology, error) {
 
 	return &Topology{
 		Name:            filepath.Base(rootDir),
+		Layout:          LayoutBare,
+		Initialized:     true,
 		BaseDir:         rootDir,
 		RepoURL:         probeRemoteOriginURL(bareDir),
 		BareDir:         bareDir,
@@ -140,19 +149,38 @@ func buildPureBareTopology(rootDir, startDir string) (*Topology, error) {
 	}, nil
 }
 
-func buildStandardCloneTopology(cloneDir string) (*Topology, error) {
-	repoDir := filepath.Join(cloneDir, ".git")
-	wtDir := filepath.Join(cloneDir, "worktrees")
+func buildCloneTopology(repo gitcfg.Repo, cfg gitcfg.Config) (*Topology, error) {
+	cloneDir := repo.BaseDir
+	strat := registeredLayouts[LayoutSubdir]
+	wtDir := strat.worktreesRoot(cloneDir, cfg.WorktreesDir)
+
+	var layout Layout
+	if cfg.Initialized && cfg.Layout != "" {
+		layout = Layout(cfg.Layout)
+	}
+
+	currentWT := ""
+	isWT := repo.IsLinkedWorktree
+	if isWT && repo.CheckoutDir != "" {
+		if rel, err := filepath.Rel(wtDir, repo.CheckoutDir); err == nil && rel != "." && rel != "" && !strings.HasPrefix(rel, "..") {
+			currentWT = filepath.ToSlash(rel)
+		} else {
+			currentWT = filepath.Base(repo.CheckoutDir)
+		}
+	}
 
 	return &Topology{
-		Name:         filepath.Base(cloneDir),
-		BaseDir:      cloneDir,
-		RepoURL:      probeRemoteOriginURL(cloneDir),
-		BareDir:      "",
-		RepoDir:      repoDir,
-		WorktreesDir: wtDir,
-		IsBare:       false,
-		IsWorktree:   false,
+		Name:            filepath.Base(cloneDir),
+		Layout:          layout,
+		Initialized:     cfg.Initialized,
+		BaseDir:         cloneDir,
+		RepoURL:         probeRemoteOriginURL(cloneDir),
+		BareDir:         "",
+		RepoDir:         repo.CommonDir,
+		WorktreesDir:    wtDir,
+		CurrentWorktree: currentWT,
+		IsBare:          false,
+		IsWorktree:      isWT,
 	}, nil
 }
 
@@ -176,6 +204,8 @@ func buildLegacySiblingTopology(rootDir, startDir string) (*Topology, error) {
 
 	return &Topology{
 		Name:            filepath.Base(rootDir),
+		Layout:          "",
+		Initialized:     false,
 		BaseDir:         rootDir,
 		RepoURL:         probeRemoteOriginURL(repoDir),
 		BareDir:         "",
@@ -184,57 +214,6 @@ func buildLegacySiblingTopology(rootDir, startDir string) (*Topology, error) {
 		CurrentWorktree: currentWT,
 		IsBare:          false,
 		IsWorktree:      isWT,
-	}, nil
-}
-
-func buildWorktreePointerTopology(wtPath, startDir string) (*Topology, error) {
-	gitFilePath := filepath.Join(wtPath, ".git")
-	data, err := os.ReadFile(gitFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read .git pointer file at %s: %w", gitFilePath, err)
-	}
-
-	line := strings.TrimSpace(string(data))
-	gitdirPrefix := "gitdir: "
-	if !strings.HasPrefix(line, gitdirPrefix) {
-		return nil, fmt.Errorf("invalid .git worktree pointer format at %s", gitFilePath)
-	}
-
-	targetGitDir := strings.TrimSpace(strings.TrimPrefix(line, gitdirPrefix))
-	if !filepath.IsAbs(targetGitDir) {
-		targetGitDir = filepath.Clean(filepath.Join(wtPath, targetGitDir))
-	}
-
-	parent := targetGitDir
-	for {
-		if filepath.Base(parent) == ".bare" && IsBareRepo(parent) {
-			rootDir := filepath.Dir(parent)
-			return buildPureBareTopology(rootDir, startDir)
-		}
-		if filepath.Base(parent) == ".git" {
-			repoDir := filepath.Dir(parent)
-			grandParent := filepath.Dir(repoDir)
-			if filepath.Base(repoDir) == "repo" {
-				return buildLegacySiblingTopology(grandParent, startDir)
-			}
-			return buildStandardCloneTopology(repoDir)
-		}
-		next := filepath.Dir(parent)
-		if next == parent {
-			break
-		}
-		parent = next
-	}
-
-	return &Topology{
-		Name:            filepath.Base(wtPath),
-		BaseDir:         wtPath,
-		RepoURL:         probeRemoteOriginURL(wtPath),
-		RepoDir:         targetGitDir,
-		WorktreesDir:    filepath.Join(filepath.Dir(wtPath), "worktrees"),
-		CurrentWorktree: filepath.Base(wtPath),
-		IsBare:          false,
-		IsWorktree:      true,
 	}, nil
 }
 

@@ -53,11 +53,21 @@ func ResolveVSCodeWorkspacePath(rootDir string, createIfMissing bool) (string, b
 // file with the active Git worktrees on disk. If no .code-workspace file exists in <root>
 // and createIfMissing is false, it is a no-op and returns ("", nil).
 func (m *Manager) SyncVSCodeWorkspace(ctx context.Context, createIfMissing bool) (string, error) {
-	if !IsBareRepo(m.RepoDir) {
+	isBare := IsBareRepo(m.RepoDir)
+	repo, cfg := m.resolveRepoConfig()
+
+	var rootDir, wtRoot string
+	switch {
+	case isBare || cfg.Layout == string(LayoutBare):
+		rootDir = filepath.Clean(filepath.Join(m.RepoDir, ".."))
+		wtRoot = rootDir
+	case cfg.Layout == string(LayoutSubdir) && repo.BaseDir != "":
+		rootDir = filepath.Clean(repo.BaseDir)
+		wtRoot = registeredLayouts[LayoutSubdir].worktreesRoot(rootDir, cfg.WorktreesDir)
+	default:
 		return "", nil
 	}
 
-	rootDir := filepath.Clean(filepath.Join(m.RepoDir, ".."))
 	wsPath, existed, err := ResolveVSCodeWorkspacePath(rootDir, createIfMissing)
 	if err != nil || wsPath == "" {
 		return "", err
@@ -69,51 +79,67 @@ func (m *Manager) SyncVSCodeWorkspace(ctx context.Context, createIfMissing bool)
 	}
 
 	seen := make(map[string]bool)
-	var relPaths []string
+	var folders []VSCodeFolder
 	for _, wt := range wts {
-		if wt.Bare {
+		if wt.Bare || wt.Path == "" || wt.Path == m.RepoDir {
 			continue
 		}
-		if wt.Path == "" || wt.Path == m.RepoDir || wt.Path == rootDir {
-			continue
-		}
-		info, statErr := os.Stat(wt.Path)
+		wtClean := filepath.Clean(wt.Path)
+		info, statErr := os.Stat(wtClean)
 		if statErr != nil || !info.IsDir() {
 			continue
 		}
-		rel, relErr := filepath.Rel(rootDir, wt.Path)
+
+		if wtClean == rootDir {
+			if !isBare && !seen["."] {
+				seen["."] = true
+				folders = append(folders, VSCodeFolder{
+					Name: filepath.Base(rootDir),
+					Path: ".",
+				})
+			}
+			continue
+		}
+
+		relPath, relErr := filepath.Rel(rootDir, wtClean)
 		if relErr != nil {
 			continue
 		}
-		rel = filepath.ToSlash(filepath.Clean(rel))
-		if rel == "." || rel == "" || rel == ".." || strings.HasPrefix(rel, "../") {
+		relPath = filepath.ToSlash(filepath.Clean(relPath))
+		if relPath == "." || relPath == "" || relPath == ".." || strings.HasPrefix(relPath, "../") {
 			continue
 		}
-		if !seen[rel] {
-			seen[rel] = true
-			relPaths = append(relPaths, rel)
+		if seen[relPath] {
+			continue
 		}
+		seen[relPath] = true
+
+		displayName := relPath
+		if wtRoot != rootDir {
+			if wtRel, wtErr := filepath.Rel(wtRoot, wtClean); wtErr == nil {
+				wtRelSlash := filepath.ToSlash(filepath.Clean(wtRel))
+				if wtRelSlash != "." && wtRelSlash != "" && !strings.HasPrefix(wtRelSlash, "../") {
+					displayName = wtRelSlash
+				}
+			}
+		}
+		folders = append(folders, VSCodeFolder{
+			Name: displayName,
+			Path: relPath,
+		})
 	}
 
-	sort.Slice(relPaths, func(i, j int) bool {
-		pI, rankI := isPrimaryWorktreeRel(relPaths[i])
-		pJ, rankJ := isPrimaryWorktreeRel(relPaths[j])
+	sort.Slice(folders, func(i, j int) bool {
+		pI, rankI := isPrimaryWorktreeFolder(folders[i])
+		pJ, rankJ := isPrimaryWorktreeFolder(folders[j])
 		if pI != pJ {
 			return pI
 		}
 		if pI && pJ && rankI != rankJ {
 			return rankI < rankJ
 		}
-		return relPaths[i] < relPaths[j]
+		return folders[i].Name < folders[j].Name
 	})
-
-	folders := make([]VSCodeFolder, 0, len(relPaths))
-	for _, rel := range relPaths {
-		folders = append(folders, VSCodeFolder{
-			Name: rel,
-			Path: rel,
-		})
-	}
 
 	rawMap := make(map[string]json.RawMessage)
 	if existed {
@@ -130,6 +156,9 @@ func (m *Manager) SyncVSCodeWorkspace(ctx context.Context, createIfMissing bool)
 		rawMap["settings"] = json.RawMessage("{}")
 	}
 
+	if folders == nil {
+		folders = []VSCodeFolder{}
+	}
 	foldersJSON, err := json.Marshal(folders)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal VS Code folders: %w", err)
@@ -147,16 +176,19 @@ func (m *Manager) SyncVSCodeWorkspace(ctx context.Context, createIfMissing bool)
 	return wsPath, nil
 }
 
-func isPrimaryWorktreeRel(rel string) (bool, int) {
-	switch rel {
-	case "main":
+func isPrimaryWorktreeFolder(f VSCodeFolder) (bool, int) {
+	if f.Path == "." {
 		return true, 0
-	case "master":
+	}
+	switch f.Path {
+	case "main":
 		return true, 1
-	case "trunk":
+	case "master":
 		return true, 2
+	case "trunk":
+		return true, 3
 	default:
-		return false, 3
+		return false, 4
 	}
 }
 

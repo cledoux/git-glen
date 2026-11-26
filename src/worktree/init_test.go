@@ -196,6 +196,7 @@ func assertBareWorkspaceConfigAndPointer(t *testing.T, rootDir, bareDir string) 
 
 	expectedConfigs := map[string]string{
 		"core.bare":                 "true",
+		"glen.layout":               "bare",
 		"extensions.worktreeConfig": "true",
 		"remote.origin.fetch":       "+refs/heads/*:refs/remotes/origin/*",
 		"push.autoSetupRemote":      "true",

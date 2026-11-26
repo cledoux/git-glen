@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"git-glen/internal/gitcfg"
 )
 
 // Scenario represents the detected repository initialization scenario.
@@ -20,19 +22,25 @@ const (
 	ScenarioBareRepair    Scenario = "bare-repair"
 	ScenarioLegacyMigrate Scenario = "legacy-migrate"
 	ScenarioGreenfield    Scenario = "greenfield"
+	ScenarioSubdirInit    Scenario = "subdir-init"
+	ScenarioSubdirRepair  Scenario = "subdir-repair"
 )
 
 // InitOptions configures optional behavior during repository initialization, conversion, migration, or repair.
 type InitOptions struct {
-	VSCode bool
+	Layout       Layout
+	WorktreesDir string
+	VSCode       bool
 }
 
 // InitResult contains execution summary metadata from repository initialization.
 type InitResult struct {
 	Scenario        Scenario
+	Layout          Layout
 	BaseDir         string
 	BareDir         string
 	MainDir         string
+	WorktreesDir    string
 	DefaultBranch   string
 	VSCodeWorkspace string
 	AgentLinks      []string
@@ -56,7 +64,7 @@ func (e *DirtyTreeError) Error() string {
 	sb.WriteString("\nSuggested actions:\n")
 	sb.WriteString(fmt.Sprintf("  1. Commit changes:   git -C %s add -A && git -C %s commit -m \"WIP\"\n", e.Dir, e.Dir))
 	sb.WriteString(fmt.Sprintf("  2. Or stash changes: git -C %s stash --include-untracked\n", e.Dir))
-	sb.WriteString("  3. Re-run initialization")
+	sb.WriteString("  3. Re-run initialization (or keep your checkout intact with `glen init --layout=subdir`)")
 	return sb.String()
 }
 
@@ -94,13 +102,16 @@ func CheckWorkingTreeClean(ctx context.Context, dir string) (bool, []string, err
 
 // DetectScenario inspects target and classifies the initialization scenario.
 func DetectScenario(target string) (Scenario, string, error) {
-	target = strings.TrimSpace(target)
-	if target == "" || target == "." {
+	rawTarget := strings.TrimSpace(target)
+	implicitCwd := rawTarget == "" || rawTarget == "."
+	if implicitCwd {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return "", "", fmt.Errorf("failed to get current working directory: %w", err)
 		}
 		target = cwd
+	} else {
+		target = rawTarget
 	}
 
 	// 1. Check if target is a remote Git URL
@@ -125,7 +136,15 @@ func DetectScenario(target string) (Scenario, string, error) {
 		return "", "", fmt.Errorf("target %s is not a directory", absPath)
 	}
 
-	// 2. Check if target has .bare/ directory (Pure Bare workspace)
+	// When invoked with no explicit target (or "."), resolve upward if inside an existing
+	// workspace checkout so `glen init` / `glen repair` works from subdirectories or worktrees.
+	if implicitCwd {
+		if repo, ok := gitcfg.Discover(absPath); ok && repo.BaseDir != "" {
+			absPath = repo.BaseDir
+		}
+	}
+
+	// 2. Check if target has .bare/ directory (bare workspace)
 	bareDir := filepath.Join(absPath, ".bare")
 	if IsBareRepo(bareDir) || isBareDirPresent(bareDir) {
 		return ScenarioBareRepair, absPath, nil
@@ -133,11 +152,11 @@ func DetectScenario(target string) (Scenario, string, error) {
 
 	// 3. Check if target has legacy repo/.git layout
 	legacyRepoGit := filepath.Join(absPath, "repo", ".git")
-	if info, err := os.Stat(legacyRepoGit); err == nil && (info.IsDir() || !info.IsDir()) {
+	if _, err := os.Stat(legacyRepoGit); err == nil {
 		return ScenarioLegacyMigrate, absPath, nil
 	}
 
-	// 4. Check if target has .git directory (Standard Clone)
+	// 4. Check if target has .git directory (Standard Clone or subdir workspace)
 	gitPath := filepath.Join(absPath, ".git")
 	if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
 		return ScenarioCloneConvert, absPath, nil
@@ -190,12 +209,12 @@ func isBareDirPresent(dir string) bool {
 }
 
 // ProbeDefaultBranch dynamically resolves the default branch name (e.g. main, master, trunk).
-func ProbeDefaultBranch(ctx context.Context, bareDir string) (string, error) {
+func ProbeDefaultBranch(ctx context.Context, gitDir string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
 	// Try remote symbolic-ref
-	cmd := exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "symbolic-ref", "refs/remotes/origin/HEAD")
+	cmd := exec.CommandContext(ctx, "git", "--git-dir="+gitDir, "symbolic-ref", "refs/remotes/origin/HEAD")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err == nil {
@@ -207,26 +226,25 @@ func ProbeDefaultBranch(ctx context.Context, bareDir string) (string, error) {
 
 	// Try local symbolic-ref
 	stdout.Reset()
-	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "symbolic-ref", "HEAD")
+	cmd = exec.CommandContext(ctx, "git", "--git-dir="+gitDir, "symbolic-ref", "HEAD")
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err == nil {
 		ref := strings.TrimSpace(stdout.String())
 		if strings.HasPrefix(ref, "refs/heads/") {
-			return strings.TrimPrefix(ref, "refs/heads/"), nil
+			b := strings.TrimPrefix(ref, "refs/heads/")
+			if errVerify := exec.CommandContext(ctx, "git", "--git-dir="+gitDir, "rev-parse", "--verify", "refs/heads/"+b).Run(); errVerify == nil {
+				return b, nil
+			}
 		}
 	}
 
-	// Probe origin/main or origin/master
-	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "rev-parse", "--verify", "origin/main")
-	if err := cmd.Run(); err == nil {
-		return "main", nil
-	}
-	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "rev-parse", "--verify", "origin/master")
-	if err := cmd.Run(); err == nil {
-		return "master", nil
+	// Probe origin/main, origin/master, main, or master
+	for _, candidate := range []string{"origin/main", "origin/master", "main", "master", "trunk"} {
+		if err := exec.CommandContext(ctx, "git", "--git-dir="+gitDir, "rev-parse", "--verify", candidate).Run(); err == nil {
+			return strings.TrimPrefix(candidate, "origin/"), nil
+		}
 	}
 
-	// Default fallback
 	return "main", nil
 }
 
@@ -243,27 +261,56 @@ func (m *Manager) InitWithOptions(ctx context.Context, target string, opts InitO
 		return nil, err
 	}
 
+	targetLayout, err := resolveTargetLayout(scen, resolvedPath, opts.Layout)
+	if err != nil {
+		return nil, err
+	}
+
 	var res *InitResult
-	switch scen {
-	case ScenarioRemoteClone:
-		res, err = m.InitBareRepo(ctx, target, resolvedPath)
-	case ScenarioCloneConvert:
-		res, err = m.ConvertStandardClone(ctx, resolvedPath)
-	case ScenarioBareRepair:
-		res, err = m.RepairWorkspace(ctx, resolvedPath)
-	case ScenarioLegacyMigrate:
-		res, err = m.MigrateLegacySibling(ctx, resolvedPath)
-	case ScenarioGreenfield:
-		res, err = m.InitGreenfield(ctx, resolvedPath)
+	switch targetLayout {
+	case LayoutBare:
+		switch scen {
+		case ScenarioRemoteClone:
+			res, err = m.InitBareRepo(ctx, target, resolvedPath)
+		case ScenarioCloneConvert:
+			res, err = m.ConvertStandardClone(ctx, resolvedPath)
+		case ScenarioBareRepair:
+			res, err = m.RepairWorkspace(ctx, resolvedPath)
+		case ScenarioLegacyMigrate:
+			res, err = m.MigrateLegacySibling(ctx, resolvedPath)
+		case ScenarioGreenfield:
+			res, err = m.InitGreenfield(ctx, resolvedPath)
+		default:
+			return nil, fmt.Errorf("unsupported bare initialization scenario: %s", scen)
+		}
+	case LayoutSubdir:
+		switch scen {
+		case ScenarioRemoteClone:
+			res, err = m.InitSubdirRepo(ctx, target, resolvedPath, opts.WorktreesDir)
+		case ScenarioCloneConvert:
+			res, err = m.InitOrRepairSubdirClone(ctx, resolvedPath, opts.WorktreesDir)
+		case ScenarioGreenfield:
+			res, err = m.InitSubdirGreenfield(ctx, resolvedPath, opts.WorktreesDir)
+		case ScenarioBareRepair:
+			return nil, fmt.Errorf("repository at %s already uses bare layout (.bare/); converting bare to subdir is not supported", resolvedPath)
+		case ScenarioLegacyMigrate:
+			return nil, fmt.Errorf("legacy sibling layout at %s must be migrated to bare layout (`glen init %s`) or initialized directly inside %s/repo", resolvedPath, resolvedPath, resolvedPath)
+		default:
+			return nil, fmt.Errorf("unsupported subdir initialization scenario: %s", scen)
+		}
 	default:
-		return nil, fmt.Errorf("unsupported initialization scenario: %s", scen)
+		return nil, fmt.Errorf("unsupported layout: %s", targetLayout)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	bareMgr := NewManager(res.BareDir)
-	wsPath, err := bareMgr.SyncVSCodeWorkspace(ctx, opts.VSCode)
+	gitAdminDir := res.BareDir
+	if gitAdminDir == "" {
+		gitAdminDir = filepath.Join(res.BaseDir, ".git")
+	}
+	wsMgr := NewManager(gitAdminDir)
+	wsPath, err := wsMgr.SyncVSCodeWorkspace(ctx, opts.VSCode)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +320,33 @@ func (m *Manager) InitWithOptions(ctx context.Context, target string, opts InitO
 	return res, nil
 }
 
-// InitBareRepo clones a remote repository into a Pure Bare root topology (.bare/ + .git + main/).
+func resolveTargetLayout(scen Scenario, resolvedPath string, explicit Layout) (Layout, error) {
+	if explicit != "" {
+		return ParseLayout(string(explicit))
+	}
+
+	switch scen {
+	case ScenarioBareRepair, ScenarioLegacyMigrate:
+		return LayoutBare, nil
+	case ScenarioCloneConvert:
+		if repo, ok := gitcfg.Discover(resolvedPath); ok {
+			cfg := gitcfg.Load(repo)
+			if cfg.State == gitcfg.StateConfigured && cfg.Layout != "" {
+				return ParseLayout(cfg.Layout)
+			}
+		}
+	}
+
+	globalCfg := gitcfg.LoadGlobal()
+	if globalCfg.DefaultLayout != "" {
+		if l, err := ParseLayout(globalCfg.DefaultLayout); err == nil {
+			return l, nil
+		}
+	}
+	return LayoutBare, nil
+}
+
+// InitBareRepo clones a remote repository into a bare root topology (.bare/ + .git + main/).
 // Spec: SPEC-0002 (REQ-0002), SPEC-0001 (REQ-0011)
 func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (*InitResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -293,7 +366,6 @@ func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (
 		}
 		entries, _ := os.ReadDir(absTarget)
 		if len(entries) > 0 {
-			// If already a bare workspace, repair it
 			if isBareDirPresent(filepath.Join(absTarget, ".bare")) {
 				return m.RepairWorkspace(ctx, absTarget)
 			}
@@ -306,7 +378,6 @@ func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (
 	}
 
 	bareDir := filepath.Join(absTarget, ".bare")
-	mainDir := filepath.Join(absTarget, "main")
 
 	// 1. Bare clone
 	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", repoURL, bareDir)
@@ -327,22 +398,22 @@ func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (
 	if branch == "" {
 		branch = "main"
 	}
+	_ = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "symbolic-ref", "HEAD", "refs/heads/"+branch).Run()
 
-	// 3. Attach primary main worktree
+	mainDir := filepath.Join(absTarget, filepath.FromSlash(branch))
+
+	// 3. Attach primary default-branch worktree
 	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "worktree", "add", mainDir, "origin/"+branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		// Try without origin/ prefix if origin branch is local
 		cmdRetry := exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "worktree", "add", mainDir, branch)
 		if outRetry, errRetry := cmdRetry.CombinedOutput(); errRetry != nil {
-			return nil, fmt.Errorf("failed to add main worktree: %w (output: %s / retry: %s)", err, strings.TrimSpace(string(out)), strings.TrimSpace(string(outRetry)))
+			return nil, fmt.Errorf("failed to add primary worktree: %w (output: %s / retry: %s)", err, strings.TrimSpace(string(out)), strings.TrimSpace(string(outRetry)))
 		}
 	}
 
-	// 4. Configure main worktree
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false")
-	_ = cmd.Run()
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "branch", "--set-upstream-to=origin/"+branch, branch)
-	_ = cmd.Run()
+	// 4. Configure primary worktree
+	_ = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false").Run()
+	_ = exec.CommandContext(ctx, "git", "-C", mainDir, "branch", "--set-upstream-to=origin/"+branch, branch).Run()
 
 	agentLinks, err := SyncAgentLinks(absTarget, mainDir)
 	if err != nil {
@@ -351,15 +422,17 @@ func (m *Manager) InitBareRepo(ctx context.Context, repoURL, targetDir string) (
 
 	return &InitResult{
 		Scenario:      ScenarioRemoteClone,
+		Layout:        LayoutBare,
 		BaseDir:       absTarget,
 		BareDir:       bareDir,
 		MainDir:       mainDir,
+		WorktreesDir:  absTarget,
 		DefaultBranch: branch,
 		AgentLinks:    agentLinks,
 	}, nil
 }
 
-// ConvertStandardClone transforms an existing clean standard clone into Pure Bare topology.
+// ConvertStandardClone transforms an existing clean standard clone into bare topology.
 // Spec: SPEC-0002 (REQ-0002, REQ-0003), SPEC-0001 (REQ-0011, REQ-0012)
 func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*InitResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
@@ -368,6 +441,12 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 	absClone, err := filepath.Abs(cloneDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve path for %s: %w", cloneDir, err)
+	}
+
+	// Guard against wiping active linked worktrees (e.g. inside .worktrees/ which may be ignored).
+	existingMgr := NewManager(filepath.Join(absClone, ".git"))
+	if wts, wtErr := existingMgr.ListWorktrees(ctx); wtErr == nil && len(wts) > 1 {
+		return nil, fmt.Errorf("cannot convert %s to bare layout while %d linked worktree(s) exist; remove linked worktrees first with `glen remove`", absClone, len(wts)-1)
 	}
 
 	// 1. Mandatory Cleanliness Check
@@ -398,11 +477,12 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 		return nil, fmt.Errorf("failed to move .git to .bare: %w", err)
 	}
 
-	// 4. Configure bare database (sets extensions.worktreeConfig=true, unsets shared core.bare, sets worktree core.bare=true)
+	// 4. Configure bare database
 	bareMgr := NewManager(bareDir)
 	if err := bareMgr.EnsureBareRepoConfig(ctx); err != nil {
 		return nil, fmt.Errorf("failed to configure bare repository: %w", err)
 	}
+	_ = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "symbolic-ref", "HEAD", "refs/heads/"+branch).Run()
 
 	// 5. Clean up old working tree files from root (since tree is clean and checked into git history)
 	entries, err := os.ReadDir(absClone)
@@ -417,21 +497,19 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 		_ = os.RemoveAll(filepath.Join(absClone, name))
 	}
 
-	// Write root .git pointer file ("gitdir: ./.bare")
 	if err := EnsureRootGitPointer(absClone); err != nil {
 		return nil, err
 	}
 
-	// 6. Add primary main worktree
-	mainDir := filepath.Join(absClone, "main")
+	// 6. Add primary default-branch worktree
+	mainDir := filepath.Join(absClone, filepath.FromSlash(branch))
 	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "worktree", "add", mainDir, branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to add main worktree: %w (output: %s)", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("failed to add primary worktree: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 
-	// 7. Configure main worktree core.bare false
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false")
-	_ = cmd.Run()
+	// 7. Configure primary worktree core.bare false
+	_ = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false").Run()
 
 	agentLinks, err := SyncAgentLinks(absClone, mainDir)
 	if err != nil {
@@ -440,16 +518,18 @@ func (m *Manager) ConvertStandardClone(ctx context.Context, cloneDir string) (*I
 
 	return &InitResult{
 		Scenario:      ScenarioCloneConvert,
+		Layout:        LayoutBare,
 		BaseDir:       absClone,
 		BareDir:       bareDir,
 		MainDir:       mainDir,
+		WorktreesDir:  absClone,
 		DefaultBranch: branch,
 		AgentLinks:    agentLinks,
 		Converted:     true,
 	}, nil
 }
 
-// RepairWorkspace repairs worktree pointers, enforces configs, and prunes stale locks in a Pure Bare repository.
+// RepairWorkspace repairs worktree pointers, enforces configs, and prunes stale locks in a bare repository.
 // Spec: SPEC-0002 (REQ-0002), SPEC-0001 (REQ-0013)
 func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
@@ -461,8 +541,6 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 	}
 
 	bareDir := filepath.Join(absRoot, ".bare")
-	mainDir := filepath.Join(absRoot, "main")
-
 	if !isBareDirPresent(bareDir) {
 		return nil, fmt.Errorf("cannot repair workspace: .bare directory not found in %s", absRoot)
 	}
@@ -471,10 +549,16 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 		return nil, err
 	}
 
+	branch, _ := ProbeDefaultBranch(ctx, bareDir)
+	if branch == "" {
+		branch = "main"
+	}
+	_ = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "symbolic-ref", "HEAD", "refs/heads/"+branch).Run()
+	mainDir := filepath.Join(absRoot, filepath.FromSlash(branch))
+
 	// 1. Repair worktrees
 	if _, err := os.Stat(mainDir); err == nil {
-		cmd := exec.CommandContext(ctx, "git", "-C", mainDir, "worktree", "repair")
-		_ = cmd.Run()
+		_ = exec.CommandContext(ctx, "git", "-C", mainDir, "worktree", "repair").Run()
 	}
 	cmd := exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "worktree", "repair")
 	cmd.Dir = bareDir
@@ -494,11 +578,6 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 	// Remove empty legacy worktrees/ container if present
 	_ = os.Remove(filepath.Join(absRoot, "worktrees"))
 
-	branch, _ := ProbeDefaultBranch(ctx, bareDir)
-	if branch == "" {
-		branch = "main"
-	}
-
 	wsPath, _ := bareMgr.SyncVSCodeWorkspace(ctx, false)
 	agentLinks, err := SyncAgentLinks(absRoot, mainDir)
 	if err != nil {
@@ -507,9 +586,11 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 
 	return &InitResult{
 		Scenario:        ScenarioBareRepair,
+		Layout:          LayoutBare,
 		BaseDir:         absRoot,
 		BareDir:         bareDir,
 		MainDir:         mainDir,
+		WorktreesDir:    absRoot,
 		DefaultBranch:   branch,
 		VSCodeWorkspace: wsPath,
 		AgentLinks:      agentLinks,
@@ -517,7 +598,7 @@ func (m *Manager) RepairWorkspace(ctx context.Context, rootDir string) (*InitRes
 	}, nil
 }
 
-// MigrateLegacySibling converts a legacy sibling layout (repo/ + worktrees/) into Pure Bare topology.
+// MigrateLegacySibling converts a legacy sibling layout (repo/ + worktrees/) into bare topology.
 // Spec: SPEC-0002 (REQ-0002), SPEC-0001 (REQ-0011)
 func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*InitResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
@@ -562,11 +643,12 @@ func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*In
 		return nil, fmt.Errorf("failed to move repo/.git to .bare: %w", err)
 	}
 
-	// 4. Configure bare (sets extensions.worktreeConfig=true, unsets shared core.bare, sets worktree core.bare=true)
+	// 4. Configure bare
 	bareMgr := NewManager(bareDir)
 	if err := bareMgr.EnsureBareRepoConfig(ctx); err != nil {
 		return nil, fmt.Errorf("failed to configure bare repository: %w", err)
 	}
+	_ = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "symbolic-ref", "HEAD", "refs/heads/"+branch).Run()
 
 	// 5. Remove legacy repo working directory
 	_ = os.RemoveAll(repoDir)
@@ -575,16 +657,15 @@ func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*In
 		return nil, err
 	}
 
-	// 6. Add primary main worktree
-	mainDir := filepath.Join(absRoot, "main")
+	// 6. Add primary default-branch worktree
+	mainDir := filepath.Join(absRoot, filepath.FromSlash(branch))
 	cmd = exec.CommandContext(ctx, "git", "--git-dir="+bareDir, "worktree", "add", mainDir, branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("failed to add main worktree: %w (output: %s)", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("failed to add primary worktree: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 
-	// 7. Configure main worktree
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false")
-	_ = cmd.Run()
+	// 7. Configure primary worktree
+	_ = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false").Run()
 
 	// 8. Defensive prune
 	_ = bareMgr.PruneWorktrees(ctx)
@@ -599,16 +680,18 @@ func (m *Manager) MigrateLegacySibling(ctx context.Context, rootDir string) (*In
 
 	return &InitResult{
 		Scenario:      ScenarioLegacyMigrate,
+		Layout:        LayoutBare,
 		BaseDir:       absRoot,
 		BareDir:       bareDir,
 		MainDir:       mainDir,
+		WorktreesDir:  absRoot,
 		DefaultBranch: branch,
 		AgentLinks:    agentLinks,
 		Migrated:      true,
 	}, nil
 }
 
-// InitGreenfield initializes a fresh empty directory into a Pure Bare repository.
+// InitGreenfield initializes a fresh empty directory into a bare repository.
 // Spec: SPEC-0002 (REQ-0002), SPEC-0001 (REQ-0011)
 func (m *Manager) InitGreenfield(ctx context.Context, targetDir string) (*InitResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
@@ -647,26 +730,185 @@ func (m *Manager) InitGreenfield(ctx context.Context, targetDir string) (*InitRe
 	}
 
 	// 3. Configure main worktree
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false")
-	_ = cmd.Run()
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "user.name", "Agent Teams")
-	_ = cmd.Run()
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "user.email", "agent@example.com")
-	_ = cmd.Run()
+	_ = exec.CommandContext(ctx, "git", "-C", mainDir, "config", "--worktree", "core.bare", "false").Run()
+	ensureFallbackCommitIdentity(ctx, mainDir)
 
 	// 4. Initial commit in main
 	readmePath := filepath.Join(mainDir, "README.md")
 	_ = os.WriteFile(readmePath, []byte("# Project\n\nInitialized with `glen init`.\n"), 0644)
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "add", "-A")
-	_ = cmd.Run()
-	cmd = exec.CommandContext(ctx, "git", "-C", mainDir, "commit", "-m", "Initial commit")
-	_ = cmd.Run()
+	_ = exec.CommandContext(ctx, "git", "-C", mainDir, "add", "-A").Run()
+	_ = exec.CommandContext(ctx, "git", "-C", mainDir, "commit", "-m", "Initial commit").Run()
 
 	return &InitResult{
 		Scenario:      ScenarioGreenfield,
+		Layout:        LayoutBare,
 		BaseDir:       absTarget,
 		BareDir:       bareDir,
 		MainDir:       mainDir,
+		WorktreesDir:  absTarget,
 		DefaultBranch: "main",
 	}, nil
+}
+
+// InitSubdirRepo clones a remote repository as a standard Git clone and configures
+// the subdir worktree layout (.git + .worktrees/<branch>).
+func (m *Manager) InitSubdirRepo(ctx context.Context, repoURL, targetDir, worktreesDir string) (*InitResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	if targetDir == "" {
+		targetDir = extractRepoNameFromURL(repoURL)
+	}
+	absTarget, err := filepath.Abs(targetDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve absolute path for %s: %w", targetDir, err)
+	}
+
+	if info, err := os.Stat(absTarget); err == nil {
+		if !info.IsDir() {
+			return nil, fmt.Errorf("target %s is a file, not a directory", absTarget)
+		}
+		entries, _ := os.ReadDir(absTarget)
+		if len(entries) > 0 {
+			if st, errGit := os.Stat(filepath.Join(absTarget, ".git")); errGit == nil && st.IsDir() {
+				return m.InitOrRepairSubdirClone(ctx, absTarget, worktreesDir)
+			}
+			return nil, fmt.Errorf("target directory %s already exists and is not empty", absTarget)
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "clone", repoURL, absTarget)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("failed to clone repository: %w (output: %s)", err, strings.TrimSpace(string(out)))
+	}
+
+	res, err := m.InitOrRepairSubdirClone(ctx, absTarget, worktreesDir)
+	if err != nil {
+		return nil, err
+	}
+	res.Scenario = ScenarioRemoteClone
+	res.Repaired = false
+	return res, nil
+}
+
+// InitOrRepairSubdirClone configures or repairs a standard Git clone in-place for the subdir
+// worktree layout without moving working-tree files (safe even on dirty working trees).
+func (m *Manager) InitOrRepairSubdirClone(ctx context.Context, cloneDir, worktreesDir string) (*InitResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+
+	absClone, err := filepath.Abs(cloneDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve path for %s: %w", cloneDir, err)
+	}
+
+	gitDir := filepath.Join(absClone, ".git")
+	if info, err := os.Stat(gitDir); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("cannot initialize subdir layout: %s is not a standard Git directory", gitDir)
+	}
+
+	alreadySubdir := false
+	if repo, ok := gitcfg.Discover(absClone); ok {
+		prev := gitcfg.Load(repo)
+		alreadySubdir = prev.State == gitcfg.StateConfigured && prev.Layout == string(LayoutSubdir)
+	}
+
+	_ = exec.CommandContext(ctx, "git", "-C", absClone, "worktree", "repair").Run()
+
+	cloneMgr := NewManager(gitDir)
+	if err := cloneMgr.EnsureSubdirRepoConfig(ctx, worktreesDir); err != nil {
+		return nil, fmt.Errorf("failed to configure subdir repository: %w", err)
+	}
+
+	_, cfg := cloneMgr.resolveRepoConfig()
+	strat := registeredLayouts[LayoutSubdir]
+	wtRoot := strat.worktreesRoot(absClone, cfg.WorktreesDir)
+	if err := os.MkdirAll(wtRoot, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create worktrees directory %s: %w", wtRoot, err)
+	}
+
+	if err := cloneMgr.PruneWorktrees(ctx); err != nil {
+		return nil, fmt.Errorf("failed to prune worktrees: %w", err)
+	}
+
+	branch, _ := ProbeDefaultBranch(ctx, gitDir)
+	if branch == "" {
+		branch = "main"
+	}
+
+	scen := ScenarioSubdirInit
+	if alreadySubdir {
+		scen = ScenarioSubdirRepair
+	}
+
+	wsPath, _ := cloneMgr.SyncVSCodeWorkspace(ctx, false)
+
+	return &InitResult{
+		Scenario:        scen,
+		Layout:          LayoutSubdir,
+		BaseDir:         absClone,
+		MainDir:         absClone,
+		WorktreesDir:    wtRoot,
+		DefaultBranch:   branch,
+		VSCodeWorkspace: wsPath,
+		Repaired:        alreadySubdir,
+	}, nil
+}
+
+// InitSubdirGreenfield initializes a fresh standard Git repository configured with the subdir layout.
+func (m *Manager) InitSubdirGreenfield(ctx context.Context, targetDir, worktreesDir string) (*InitResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	defer cancel()
+
+	absTarget, err := filepath.Abs(targetDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve path for %s: %w", targetDir, err)
+	}
+	if err := os.MkdirAll(absTarget, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create target directory %s: %w", absTarget, err)
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "init", "-b", "main", absTarget)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("failed to git init: %w (%s)", err, out)
+	}
+
+	gitDir := filepath.Join(absTarget, ".git")
+	cloneMgr := NewManager(gitDir)
+	if err := cloneMgr.EnsureSubdirRepoConfig(ctx, worktreesDir); err != nil {
+		return nil, fmt.Errorf("failed to configure subdir repository: %w", err)
+	}
+
+	_, cfg := cloneMgr.resolveRepoConfig()
+	wtRoot := registeredLayouts[LayoutSubdir].worktreesRoot(absTarget, cfg.WorktreesDir)
+	if err := os.MkdirAll(wtRoot, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create worktrees directory %s: %w", wtRoot, err)
+	}
+
+	ensureFallbackCommitIdentity(ctx, absTarget)
+
+	readmePath := filepath.Join(absTarget, "README.md")
+	_ = os.WriteFile(readmePath, []byte("# Project\n\nInitialized with `glen init --layout=subdir`.\n"), 0644)
+	_ = exec.CommandContext(ctx, "git", "-C", absTarget, "add", "README.md").Run()
+	_ = exec.CommandContext(ctx, "git", "-C", absTarget, "commit", "-m", "Initial commit").Run()
+
+	return &InitResult{
+		Scenario:      ScenarioGreenfield,
+		Layout:        LayoutSubdir,
+		BaseDir:       absTarget,
+		MainDir:       absTarget,
+		WorktreesDir:  wtRoot,
+		DefaultBranch: "main",
+	}, nil
+}
+
+func ensureFallbackCommitIdentity(ctx context.Context, worktreeDir string) {
+	var out bytes.Buffer
+	check := exec.CommandContext(ctx, "git", "-C", worktreeDir, "config", "--get", "user.email")
+	check.Stdout = &out
+	if err := check.Run(); err == nil && strings.TrimSpace(out.String()) != "" {
+		return
+	}
+	_ = exec.CommandContext(ctx, "git", "-C", worktreeDir, "config", "--worktree", "user.name", "Agent Teams").Run()
+	_ = exec.CommandContext(ctx, "git", "-C", worktreeDir, "config", "--worktree", "user.email", "agent@example.com").Run()
 }
