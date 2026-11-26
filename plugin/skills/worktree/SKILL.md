@@ -8,45 +8,46 @@ description: >-
 
 # Git Worktree Workflow for Multi-Agent Coordination
 
-This skill provides standard procedures for discovering repository topology,
-creating isolated feature worktrees at `<root>/<branch-name>`, configuring
+This skill provides standard procedures for discovering repository layout
+(`bare` or `subdir`), creating isolated feature worktrees, configuring
 per-worktree author identities, and tearing down merged worktrees without
 working tree or branch collisions.
 
-For deep architectural background on the Pure Bare Repository Root topology,
-per-worktree config isolation, and recovery procedures, see
-[pure-bare-topology.md](./references/pure-bare-topology.md).
+For architectural details on the `bare` and `subdir` layouts, `[glen]` Git
+configuration, per-worktree config isolation, and recovery procedures, see
+[layouts.md](./references/layouts.md).
 
-If a repository is not yet configured with `.bare/` + `.git` + `main/`, use the
-**`worktree-init`** skill (`../worktree-init/SKILL.md`) to initialize, convert,
-or repair it.
+If a repository is not yet initialized with `glen` (`glen list` reports
+`uninitialized`), use the **`worktree-init`** skill
+(`../worktree-init/SKILL.md`) to initialize, convert, or repair it (`glen init`
+for `bare`, or `glen init --layout=subdir` for in-place `subdir`).
 
 ______________________________________________________________________
 
 ## Core Principles & Invariants
 
-- **Never Edit Code in `main/`**: Always perform feature, bugfix, and
-  refactoring work inside an isolated worktree at `<root>/<branch-name>`.
-- **Never Run Working-Tree Commands at `<root>/`**: In a Pure Bare topology,
-  `<root>/` contains `<root>/.bare/`, `<root>/.git` (`gitdir: ./.bare`),
-  `<root>/main/`, and `<root>/<branch-name>/`. While `<root>/.git` allows IDEs
-  and metadata commands (`git worktree list`, `git fetch`, `git branch`) to run
-  from `<root>/`, `<root>/` has `core.bare = true` and is NOT a working tree.
-  Always target `git -C <root>/main` or `git -C <root>/<branch-name>` for
-  working-tree commands (`git status`, `git diff`, `git add`, `git commit`,
-  `git checkout`).
-- **Direct Branch Folder Naming**: Every worktree directory inside `<root>/`
-  matches its branch name directly:
-  - `main` -> `<root>/main`
-  - `feat/finding-ingestion` -> `<root>/feat/finding-ingestion`
-  - `feat/101-sqlite-state` -> `<root>/feat/101-sqlite-state`
-  - `fix/sigterm-handling` -> `<root>/fix/sigterm-handling`
-- **Sandboxed Terminals**: State-changing Git commands (`git worktree add`,
-  `git worktree remove`, `git worktree prune`, `git config --worktree`,
-  `git commit`, `git branch`, `git fetch`, `git push`) write to `.bare/` and
-  fail in terminal sandboxes that mount `.bare/` read-only; re-run them with
-  sandbox escalation. Read-only commands (`git status`, `git diff`, `git log`,
-  `git worktree list`) never need it.
+- **Never Edit Code on the Default Branch**: Always perform feature, bugfix, and
+  refactoring work inside an isolated feature worktree (`<root>/<branch-name>`
+  in `bare`, or `<repo>/.worktrees/<branch-name>` in `subdir`).
+- **Never Run Working-Tree Commands at `<root>/` in `bare` Layout**: In a `bare`
+  workspace, `<root>/` contains `<root>/.bare/`, `<root>/.git`
+  (`gitdir: ./.bare`), `<root>/main/`, and `<root>/<branch-name>/`. `<root>/`
+  has `core.bare = true` and is NOT a working tree. Always target
+  `git -C <root>/main` or `git -C <root>/<branch-name>` for working-tree
+  commands (`git status`, `git diff`, `git add`, `git commit`, `git checkout`).
+- **Direct Branch Folder Naming**: Worktree directories mirror branch names
+  directly under the layout's worktrees root:
+  - **`bare` layout (`<root>/<branch-name>`)**: `feat/101-sqlite-state` ->
+    `<root>/feat/101-sqlite-state`
+  - **`subdir` layout (`<repo>/.worktrees/<branch-name>`)**:
+    `feat/101-sqlite-state` -> `<repo>/.worktrees/feat/101-sqlite-state`
+- **Sandboxed Terminals**: State-changing Git commands (`glen create`,
+  `glen remove`, `glen prune`, `glen init`, `git worktree add`,
+  `git worktree remove`, `git config --worktree`, `git commit`, `git branch`,
+  `git fetch`, `git push`) write to `.bare/` or `.git/` and fail in terminal
+  sandboxes that mount Git metadata read-only; re-run them with sandbox
+  escalation. Read-only commands (`git status`, `git diff`, `git log`,
+  `glen list`) never need it.
 
 ______________________________________________________________________
 
@@ -55,14 +56,14 @@ ______________________________________________________________________
 Use `glen` (or `git glen`) to manage worktrees deterministically:
 
 ```bash
-# Initialize, convert, migrate, or repair a repository into Pure Bare topology
+# Initialize, convert, migrate, or repair a repository (`bare` default, or `subdir`)
 # Optional --vscode creates/updates <root>/<repo>.code-workspace (kept in sync by create/remove/prune)
-glen init [--vscode] [target-dir-or-url] [-C <dir>]
+glen init [--layout=bare|subdir] [--vscode] [target-dir-or-url] [-C <dir>]
 
-# List active worktrees and topology paths (read-only; supports --json)
+# List active worktrees and layout status (read-only; supports --json)
 glen list [-C <workspace-path>] [--json]
 
-# Create an isolated feature worktree at <root>/<branch-name>
+# Create an isolated feature worktree (<root>/<branch> in bare, <repo>/.worktrees/<branch> in subdir)
 glen create <branch-or-slug> [base-ref] [--issue <id>] [--name "Agent" --email "user+agent@example.com"] [-C <workspace-path>]
 
 # Tear down a merged worktree, clean up empty parent folders, prune locks, and delete its local branch
@@ -74,38 +75,21 @@ glen prune [-C <workspace-path>]
 
 ______________________________________________________________________
 
-## Step-by-Step Manual Procedure
+## Step-by-Step Workflow
 
-### 1. Discover Workspace Root & Inspect Active Worktrees
+### Discover Workspace Layout & Active Worktrees
 
-Resolve `<root>` by locating the directory containing `.bare/`, then list active
-worktrees:
-
-```bash
-git --git-dir=<root>/.bare worktree list
-```
-
-### 2. Fetch Latest Remote State & Ensure Bare Defaults
-
-Ensure `<root>/.git` points to `./.bare`, `.bare` has per-worktree config
-enabled (`core.bare = true` in `.bare/config.worktree` and removed from shared
-`.bare/config`), the wildcard fetch refspec and ergonomic defaults configured,
-and fetch the latest default branch from `origin` (or `upstream`):
+Inspect the workspace layout and active checkouts:
 
 ```bash
-echo "gitdir: ./.bare" > <root>/.git
-git --git-dir=<root>/.bare config extensions.worktreeConfig true
-git --git-dir=<root>/.bare config --unset-all core.bare || true
-git --git-dir=<root>/.bare config --worktree core.bare true
-git --git-dir=<root>/.bare config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-git --git-dir=<root>/.bare config push.autoSetupRemote true
-git --git-dir=<root>/.bare config branch.autoSetupMerge simple
-git --git-dir=<root>/.bare config fetch.prune true
-git --git-dir=<root>/.bare config worktree.guessRemote true
-git --git-dir=<root>/.bare fetch origin
+glen list -C <workspace-path>
 ```
 
-### 3. Create an Isolated Worktree
+If `Layout` is `uninitialized`, initialize first (`glen init --layout=subdir` to
+keep an existing clone in-place, or `glen init` to convert a clean clone to
+`bare`).
+
+### Create an Isolated Worktree
 
 1. Choose a descriptive branch name (`<branch-name>`):
    - Issue-scoped feature: `feat/<issue-id>-<slug>` (e.g.
@@ -113,85 +97,72 @@ git --git-dir=<root>/.bare fetch origin
    - General feature: `feat/<task-slug>` (e.g. `feat/worktree-plugin`)
    - Bug fix: `fix/<issue-slug>` (e.g. `fix/sigterm-handling`)
    - Docs / Refactor: `docs/<slug>`, `refactor/<slug>`
-1. Provision the worktree at `<root>/<branch-name>` from `.bare`:
+1. Provision the worktree via `glen create` (fetches `origin` automatically when
+   configured):
    ```bash
-   git --git-dir=<root>/.bare worktree add \
-       <root>/<branch-name> \
-       -b <branch-name> origin/main
+   glen create <branch-name> -C <workspace-path>
    ```
    - **Building on a Non-Default Base Branch**: When instructed to build on top
      of an existing non-`main` branch (e.g. a teammate's branch or an unmerged
-     stacked base branch), always create a new feature worktree/branch off that
-     base branch (`glen create <new-branch> <base-branch>`) rather than editing
-     or committing directly onto the base branch's worktree.
-1. Set `core.bare = false` in the worktree's isolated config (defense-in-depth):
-   ```bash
-   git -C <root>/<branch-name> config --worktree core.bare false
-   ```
-1. *(Optional)* If operating under a specific agent persona, isolate Git author
-   identity:
-   ```bash
-   git -C <root>/<branch-name> config --worktree user.name "<Agent Name>"
-   git -C <root>/<branch-name> config --worktree user.email "<user+agent@example.com>"
-   ```
-1. **Validation**: Run `git -C <root>/<branch-name> status` and confirm it
-   reports `On branch <branch-name>` with a clean working tree.
+     stacked base branch), always create a new feature worktree off that base
+     branch (`glen create <new-branch> <base-branch>`) rather than editing or
+     committing directly onto the base branch's worktree.
+   - *(Optional)* Pass
+     `--name "<Agent Name>" --email "<user+agent@example.com>"` to isolate
+     per-worktree Git author identity.
+1. **Validation**: Run `git -C <worktree-path> status` and confirm it reports
+   `On branch <branch-name>` with a clean working tree.
 
-### 4. Work Strictly Inside the Worktree
+### Work Strictly Inside the Worktree
 
-- Target all file edits (`write_to_file`, `replace_file_content`, `view_file`)
-  and shell commands (`Cwd`) strictly to `<root>/<branch-name>`.
+- Target all file edits and shell commands strictly to the created worktree path
+  (`<root>/<branch-name>` in `bare`, or `<repo>/.worktrees/<branch-name>` in
+  `subdir`).
 - Always run formatters (`mdformat` for `.md` files) and test suites with an
   explicit outer timeout:
   ```bash
-  timeout 60s make test
+  timeout 60s just test
   ```
 
-### 5. Commit, Push & Open Pull Request
+### Commit, Push & Open Pull Request
 
 1. Use the bundled **`commit`** skill (`../commit/SKILL.md`) (or **`shipit`**
    skill `../shipit/SKILL.md` for lightweight fast-path changes) to create
    atomic commits recording both the **Why** and the **What**.
 1. Push the branch:
    ```bash
-   git -C <root>/<branch-name> push -u origin <branch-name>
+   git -C <worktree-path> push -u origin <branch-name>
    ```
 1. Ensure automatic remote branch deletion is enabled on the GitHub repository:
    ```bash
    gh repo edit --delete-branch-on-merge
    ```
-1. When explicitly **stacking** a PR on top of a parent PR (e.g. the user asks
-   to *"stack it on top of PR #72"* or the PR is part of a logical stacked PR
-   chain, not merely branched off in-flight work to avoid waiting), also
-   register or update the native GitHub Pull Request Stack via
+1. When explicitly **stacking** a PR on top of a parent PR, also register or
+   update the native GitHub Pull Request Stack via
    `POST /repos/<owner>/<repo>/stacks` (or
    `PATCH /repos/<owner>/<repo>/stacks/<stack_number>`) as documented in
    `../commit/SKILL.md`.
 
-### 6. Merge & Post-Merge Cleanup
+### Merge & Post-Merge Cleanup
 
 Keep the worktree alive during code review. Once the pull request is approved
 and ready to merge, use the bundled **`submit`** skill (`../submit/SKILL.md`):
 
 1. Merge the PR **without** `--delete-branch` (to prevent local checkout
-   collisions with `<root>/main/`):
+   collisions with the primary default-branch checkout):
    ```bash
    gh pr merge <pr-number> --squash
    ```
-1. Synchronize `<root>/main/` with the merged upstream changes:
+1. Synchronize the default-branch checkout (`<root>/main` in `bare`, or `<repo>`
+   in `subdir`) with the merged upstream changes:
    ```bash
-   git -C <root>/main pull --ff-only origin main
+   git -C <default-worktree> pull --ff-only origin main
    ```
 1. Remove the merged feature worktree, prune stale metadata, and delete the
    local branch:
    ```bash
-   glen remove <branch-name> -C <root>
-   # or manually:
-   git --git-dir=<root>/.bare worktree remove <root>/<branch-name>
-   git --git-dir=<root>/.bare worktree prune --expire now
-   git --git-dir=<root>/.bare branch -D <branch-name>
-   git --git-dir=<root>/.bare fetch --prune origin
+   glen remove <branch-name> -C <workspace-path>
    ```
-1. **Validation**: Run `git --git-dir=<root>/.bare worktree list` and verify
-   that `<root>/<branch-name>` is removed and `<root>/main` is at the latest
-   merged commit.
+1. **Validation**: Run `glen list -C <workspace-path>` and verify that the
+   feature worktree is removed and the default branch is at the latest merged
+   commit.

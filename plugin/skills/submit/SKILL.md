@@ -25,8 +25,9 @@ ______________________________________________________________________
    single invocation unless the user explicitly passes multiple PR numbers
    (e.g., `/submit #83 #85`).
 1. **Isolated Worktree Cleanup**: Only delete the local branch and worktree
-   corresponding strictly to the merged branch (`<root>/<branch-name>`). NEVER
-   touch or delete adjacent peer worktrees inside `<root>/`.
+   corresponding strictly to the merged branch (`<root>/<branch-name>` in `bare`
+   or `<repo>/.worktrees/<branch-name>` in `subdir`). NEVER touch or delete
+   adjacent peer worktrees.
 
 ______________________________________________________________________
 
@@ -34,8 +35,8 @@ ______________________________________________________________________
 
 ### Step 1: Active Branch & PR Discovery
 
-1. Discover repository topology and VCS markers (`.bare` + `.git` + `main` Pure
-   Bare topology, standard `.git` clone, `.jj`, or `.hg`).
+1. Discover repository topology and VCS markers (`bare` `.bare/` + `main/`,
+   `subdir` `.git/` + `.worktrees/`, standard `.git/` clone, `.jj`, or `.hg`).
 1. Identify the active branch in the target worktree:
    ```bash
    git -C <worktree-path> branch --show-current
@@ -128,21 +129,18 @@ ______________________________________________________________________
 
 ### Step 4: Upstream Synchronization & Local Worktree / Branch Cleanup
 
-1. **If operating in a Pure Bare worktree topology (`<root>/.bare` +
-   `<root>/main` + `<root>/<branch-name>`)**:
-   - Synchronize the primary `<root>/main` worktree with upstream:
+1. **If operating in a `glen` worktree layout (`bare`: `<root>/.bare` +
+   `<root>/main` + `<root>/<branch-name>`; or `subdir`: `<repo>` +
+   `<repo>/.worktrees/<branch-name>`)**:
+   - Synchronize the primary default-branch checkout (`<root>/main` in `bare`,
+     or `<repo>` in `subdir`) with upstream:
      ```bash
-     git -C <root>/main pull --ff-only origin main
+     git -C <default-worktree> pull --ff-only origin main
      ```
    - Remove the merged feature worktree, prune stale metadata, and delete the
      local feature branch:
      ```bash
-     glen remove "<branch-name>" -C <root>
-     # or manually:
-     git --git-dir=<root>/.bare worktree remove <root>/<branch-name>
-     git --git-dir=<root>/.bare worktree prune --expire now
-     git --git-dir=<root>/.bare branch -D "<branch-name>"
-     git --git-dir=<root>/.bare fetch --prune origin
+     glen remove "<branch-name>" -C <workspace-root>
      ```
 1. **If operating in a standard single-worktree clone**:
    - Switch to default branch: `git checkout main`

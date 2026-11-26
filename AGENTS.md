@@ -1,8 +1,8 @@
 # Glen (`git-glen`)
 
 A plugin for Claude Code and Antigravity, a CLI (`glen` / `git-glen`), and a
-zero-dependency Go package (`git-glen/worktree`) for Pure Bare repository
-topologies and guided Git/GitHub workflows.
+zero-dependency Go package (`git-glen/worktree`) for isolated Git worktree
+layouts (`bare` and `subdir`) and guided Git/GitHub workflows.
 
 This file is the shared instruction source for every agent. `CLAUDE.md` imports
 it; Antigravity reads `AGENTS.md` natively. Put agent-specific notes only in
@@ -19,13 +19,14 @@ git-glen/
 │   ├── .claude-plugin/plugin.json  # Claude Code plugin manifest
 │   ├── hooks/hooks.json            # Claude Code hooks (SessionStart, PreToolUse -> glen hook)
 │   ├── assets/                     # Plugin logo assets
-│   ├── rules/                      # Pure Bare guidance (Antigravity rule; Claude SessionStart context)
+│   ├── rules/                      # Worktree & GitHub stack guidance (Antigravity rules; Claude SessionStart context)
 │   └── skills/                     # Shared skills (worktree, worktree-init, commit, submit, shipit, just, prime, retro)
 ├── bin/                            # Compiled binaries (bin/glen, bin/git-glen)
 └── src/                            # Go module (git-glen)
     ├── cmd/glen/                   # CLI entrypoint (init, list, create, remove, prune, repair, hook)
-    ├── worktree/                   # Exported package: Pure Bare init, worktree lifecycle, topology discovery
+    ├── worktree/                   # Exported package: multi-layout init, worktree lifecycle, topology discovery
     └── internal/
+        ├── gitcfg/                 # Pure-Go $GIT_COMMON_DIR and [glen] config reader
         ├── hook/                   # Agent-neutral guard logic behind `glen hook`
         └── testutil/               # Hermetic Git workspace test fixtures
 ```
@@ -49,7 +50,7 @@ merging.
 
 ## Working in This Repository
 
-This repository is itself a Pure Bare workspace (`.bare/` + `main/` +
+This repository uses the `bare` workspace layout (`.bare/` + `main/` +
 `<branch>/`). Make changes in a feature worktree created with
 `glen create <branch-name>`, never in `main/`. Glen's own hooks enforce this
 once the plugin is installed.
@@ -62,8 +63,8 @@ once the plugin is installed.
 - **Hooks fail open**: `glen hook` must never block an agent because of its own
   error. Any parse or I/O failure returns a pass-through response.
 - **Agent neutrality**: Skills and rules must not reference one agent's tool
-  parameters (e.g. Antigravity's `BypassSandbox`). Describe intent ("re-run
-  with sandbox escalation") and let each agent map it.
+  parameters. Describe intent ("re-run with sandbox escalation") and let each
+  agent map it.
 - **Two hook manifests**: Guard behavior changes go in `src/internal/hook`;
   `plugin/hooks.json` (Antigravity) and `plugin/hooks/hooks.json` (Claude Code)
   only wire events to `glen hook`. Keep both manifests in sync.
@@ -72,17 +73,17 @@ once the plugin is installed.
 
 ## Debugging Hooks
 
-Set `GLEN_HOOK_LOG=/path/to/file` in the agent's environment to append every
-raw hook payload to that file.
+Set `GLEN_HOOK_LOG=/path/to/file` in the agent's environment to append every raw
+hook payload to that file.
 
 Antigravity hook behavior (verified against agy, 2026-10):
 
 - Any JSON reply without an explicit `"allow"` (including `{}` and
-  `{"decision":""}`) **denies** the tool call. Empty stdout is the only
-  neutral reply, and it leaves normal permission prompts intact.
-- A hook command that exits non-zero (e.g. `glen` not on PATH) **denies every
-  tool call**. Hook commands are therefore wrapped in
-  `command -v glen ... && glen hook ... || true`; keep that wrapper.
+  `{"decision":""}`) **denies** the tool call. Empty stdout is the only neutral
+  reply, and it leaves normal permission prompts intact.
+- A hook command that exits non-zero (e.g. `glen` missing) **denies every tool
+  call**. Hook commands resolve `glen` from `PATH` with a
+  `$HOME/.local/bin/glen` fallback and end with `|| true`; keep that wrapper.
 - Edit tools are `write_to_file` and `replace_file_content` with the path in
   `TargetFile`; `run_command` carries `CommandLine` and `Cwd`.
 - To test the plugin without installing it globally, declare it in a scratch

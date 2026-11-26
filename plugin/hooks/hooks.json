@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=$(command -v glen 2>/dev/null || printf '%s/.local/bin/glen' \"$HOME\"); [ -x \"$g\" ] && \"$g\" hook session-start --agent=claude --context-file \"${CLAUDE_PLUGIN_ROOT}/rules/pure-bare-worktrees.md\" || true",
+            "command": "g=$(command -v glen 2>/dev/null || printf '%s/.local/bin/glen' \"$HOME\"); [ -x \"$g\" ] && \"$g\" hook session-start --agent=claude --context-file \"${CLAUDE_PLUGIN_ROOT}/rules/worktrees.md\" || true",
             "timeout": 10
           }
         ]
