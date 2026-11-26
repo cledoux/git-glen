@@ -103,24 +103,32 @@ func hookPreToolUse(agent string, payload []byte, stdout, stderr io.Writer) int 
 	}
 
 	d := hook.Evaluate(action)
-	if !d.Deny {
-		return passThrough()
+	if d.Deny {
+		var resp any
+		switch agent {
+		case agentClaude:
+			resp = map[string]any{
+				"hookSpecificOutput": map[string]any{
+					"hookEventName":            "PreToolUse",
+					"permissionDecision":       "deny",
+					"permissionDecisionReason": d.Reason,
+				},
+			}
+		case agentAgy:
+			resp = map[string]any{"decision": "deny", "reason": d.Reason}
+		}
+		return writeJSON(resp, stdout, stderr)
 	}
 
-	var resp any
-	switch agent {
-	case agentClaude:
-		resp = map[string]any{
-			"hookSpecificOutput": map[string]any{
-				"hookEventName":            "PreToolUse",
-				"permissionDecision":       "deny",
-				"permissionDecisionReason": d.Reason,
-			},
+	if len(d.Overwrite) > 0 && agent == agentAgy {
+		resp := map[string]any{
+			"decision":  "allow",
+			"overwrite": d.Overwrite,
 		}
-	case agentAgy:
-		resp = map[string]any{"decision": "deny", "reason": d.Reason}
+		return writeJSON(resp, stdout, stderr)
 	}
-	return writeJSON(resp, stdout, stderr)
+
+	return passThrough()
 }
 
 func hookSessionStart(agent, contextFile string, payload []byte, stdout, stderr io.Writer) int {
@@ -206,10 +214,8 @@ func parseClaudeToolCall(payload []byte) (hook.Action, error) {
 
 // parseAgyToolCall reads Antigravity's PreToolUse payload. Observed in agy
 // 2026-10: write_to_file and replace_file_content carry the target in
-// TargetFile; run_command carries CommandLine and Cwd. Other file-mutating tool
-// names found in the agy binary are guarded by any string argument whose key
-// mentions a file or path. Every other tool passes, so reads never trip the
-// edit guard.
+// TargetFile; run_command carries CommandLine and Cwd; invoke_subagent carries
+// TypeName and Workspace; swarm carries action, name, and workspace.
 func parseAgyToolCall(payload []byte) (hook.Action, error) {
 	var in struct {
 		WorkspacePaths []string `json:"workspacePaths"`
@@ -241,6 +247,25 @@ func parseAgyToolCall(payload []byte) (hook.Action, error) {
 			}
 			if s, ok := v.(string); ok && s != "" {
 				a.Paths = append(a.Paths, s)
+			}
+		}
+	case "invoke_subagent":
+		typeName, _ := in.ToolCall.Args["TypeName"].(string)
+		ws, _ := in.ToolCall.Args["Workspace"].(string)
+		a.Spawn = &hook.SpawnAction{
+			AgentIdent:   typeName,
+			Workspace:    ws,
+			WorkspaceKey: "Workspace",
+		}
+	case "swarm":
+		subAction, _ := in.ToolCall.Args["action"].(string)
+		if subAction == "add" {
+			name, _ := in.ToolCall.Args["name"].(string)
+			ws, _ := in.ToolCall.Args["workspace"].(string)
+			a.Spawn = &hook.SpawnAction{
+				AgentIdent:   name,
+				Workspace:    ws,
+				WorkspaceKey: "workspace",
 			}
 		}
 	}

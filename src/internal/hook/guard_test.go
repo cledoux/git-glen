@@ -223,6 +223,146 @@ func TestEvaluateSubdirLayout_AllowsNonDefaultBranchAndProtectMainFalse(t *testi
 	})
 }
 
+func TestEvaluateSpawnAutoIsolate_InitializedAndReadOnlyAllowlist(t *testing.T) {
+	bareRoot := setupWorkspace(t, "ref: refs/heads/main\n")
+	subdirRepo := setupSubdirWorkspace(t, "ref: refs/heads/main\n", "\treadOnlyAgents = custom-ro, helper-*\n")
+
+	for _, tc := range []struct {
+		name string
+		cwd  string
+	}{
+		{"BareWorkspace", bareRoot},
+		{"SubdirWorkspace", subdirRepo},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Omitted and "inherit" workspace values are upgraded to "share"
+			for _, ws := range []string{"", "inherit"} {
+				d := Evaluate(Action{
+					Cwd: tc.cwd,
+					Spawn: &SpawnAction{
+						AgentIdent:   "self",
+						Workspace:    ws,
+						WorkspaceKey: "Workspace",
+					},
+				})
+				if d.Deny || d.Overwrite["Workspace"] != "share" {
+					t.Errorf("ws=%q: got %+v, want Overwrite[Workspace]=share", ws, d)
+				}
+			}
+
+			// Explicit "share" and "branch" pass through untouched
+			for _, ws := range []string{"share", "branch"} {
+				d := Evaluate(Action{
+					Cwd: tc.cwd,
+					Spawn: &SpawnAction{
+						AgentIdent:   "coder",
+						Workspace:    ws,
+						WorkspaceKey: "workspace",
+					},
+				})
+				if len(d.Overwrite) != 0 {
+					t.Errorf("ws=%q: got unexpected overwrite %+v", ws, d.Overwrite)
+				}
+			}
+
+			// Read-only built-in patterns pass through untouched
+			for _, ro := range []string{
+				"explore", "plan", "narrator", "monitor",
+				"research-web", "code-researcher", "pr-reviewer",
+				"sdd-auditor", "doc_reviewer", "verifier-1", "app-guide",
+			} {
+				d := Evaluate(Action{
+					Cwd: tc.cwd,
+					Spawn: &SpawnAction{
+						AgentIdent:   ro,
+						Workspace:    "inherit",
+						WorkspaceKey: "workspace",
+					},
+				})
+				if len(d.Overwrite) != 0 {
+					t.Errorf("read-only agent %q should not be rewritten, got %+v", ro, d.Overwrite)
+				}
+			}
+		})
+	}
+
+	// Custom glen.readOnlyAgents patterns configured in subdirRepo
+	for _, custom := range []string{"custom-ro", "helper-docs"} {
+		d := Evaluate(Action{
+			Cwd: subdirRepo,
+			Spawn: &SpawnAction{
+				AgentIdent:   custom,
+				Workspace:    "",
+				WorkspaceKey: "Workspace",
+			},
+		})
+		if len(d.Overwrite) != 0 {
+			t.Errorf("custom readOnlyAgents %q should pass through, got %+v", custom, d.Overwrite)
+		}
+	}
+}
+
+func TestEvaluateSpawnAutoIsolate_PrecedenceAndUninitializedRepos(t *testing.T) {
+	uninit := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(uninit, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uninit, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uninit, ".git", "config"), []byte("[core]\n\tbare = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	spawn := &SpawnAction{AgentIdent: "coder", Workspace: "inherit", WorkspaceKey: "workspace"}
+
+	t.Run("OffByDefaultInUninitializedClone", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+		if d := Evaluate(Action{Cwd: uninit, Spawn: spawn}); len(d.Overwrite) != 0 {
+			t.Errorf("expected no overwrite in uninitialized clone by default, got %+v", d.Overwrite)
+		}
+	})
+
+	t.Run("EnabledInUninitializedCloneViaGlobalConfig", func(t *testing.T) {
+		globalCfg := filepath.Join(t.TempDir(), "gitconfig")
+		if err := os.WriteFile(globalCfg, []byte("[glen]\n\tautoIsolate = true\n"), 0o644); err != nil {
+			t.Fatalf("write global config: %v", err)
+		}
+		t.Setenv("GIT_CONFIG_GLOBAL", globalCfg)
+
+		d := Evaluate(Action{Cwd: uninit, Spawn: spawn})
+		if d.Overwrite["workspace"] != "share" {
+			t.Errorf("expected global autoIsolate=true to isolate uninitialized clone, got %+v", d)
+		}
+	})
+
+	t.Run("RepoFalseOverridesGlobalTrue", func(t *testing.T) {
+		globalCfg := filepath.Join(t.TempDir(), "gitconfig")
+		if err := os.WriteFile(globalCfg, []byte("[glen]\n\tautoIsolate = true\n"), 0o644); err != nil {
+			t.Fatalf("write global config: %v", err)
+		}
+		t.Setenv("GIT_CONFIG_GLOBAL", globalCfg)
+
+		repo := setupSubdirWorkspace(t, "ref: refs/heads/main\n", "\tautoIsolate = false\n")
+		t.Setenv("GIT_CONFIG_GLOBAL", globalCfg)
+		if d := Evaluate(Action{Cwd: repo, Spawn: spawn}); len(d.Overwrite) != 0 {
+			t.Errorf("expected repo autoIsolate=false to disable rewrite, got %+v", d.Overwrite)
+		}
+	})
+
+	t.Run("EnvOverrideAndNonGitDir", func(t *testing.T) {
+		t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+		t.Setenv(EnvAutoIsolate, "1")
+		if d := Evaluate(Action{Cwd: uninit, Spawn: spawn}); d.Overwrite["workspace"] != "share" {
+			t.Errorf("expected %s=1 to enable rewrite in uninitialized git repo, got %+v", EnvAutoIsolate, d)
+		}
+		nonGit := t.TempDir()
+		if d := Evaluate(Action{Cwd: nonGit, Spawn: spawn}); len(d.Overwrite) != 0 {
+			t.Errorf("expected non-git directory never to rewrite workspace, got %+v", d.Overwrite)
+		}
+	})
+}
+
 func TestEvaluateDeleteBranchMerge(t *testing.T) {
 	tests := []struct {
 		command  string

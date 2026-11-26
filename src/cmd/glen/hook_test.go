@@ -174,6 +174,89 @@ func TestHookPreToolUseAgy(t *testing.T) {
 	})
 }
 
+func TestHookPreToolUseAgy_SpawnAutoIsolate(t *testing.T) {
+	root := setupHookWorkspace(t)
+	args := []string{"pre-tool-use", "--agent=agy"}
+
+	t.Run("RewritesInvokeSubagentDefaultWorkspace", func(t *testing.T) {
+		code, out, _ := runHookWith(t, args, map[string]any{
+			"workspacePaths": []string{filepath.Join(root, "main")},
+			"toolCall": map[string]any{
+				"name": "invoke_subagent",
+				"args": map[string]any{
+					"TypeName": "self",
+					"Role":     "Auth Implementer",
+					"Prompt":   "Implement feature",
+				},
+			},
+		})
+		if code != 0 {
+			t.Fatalf("code = %d, want 0", code)
+		}
+		var resp struct {
+			Decision  string         `json:"decision"`
+			Overwrite map[string]any `json:"overwrite"`
+		}
+		if err := json.Unmarshal([]byte(out), &resp); err != nil {
+			t.Fatalf("stdout is not JSON: %v (%q)", err, out)
+		}
+		if resp.Decision != "allow" || resp.Overwrite["Workspace"] != "share" {
+			t.Errorf("got %+v, want decision=allow and overwrite.Workspace=share", resp)
+		}
+	})
+
+	t.Run("RewritesSwarmAddInheritAndSkipsNonAddOrReadOnly", func(t *testing.T) {
+		_, out, _ := runHookWith(t, args, map[string]any{
+			"workspacePaths": []string{filepath.Join(root, "main")},
+			"toolCall": map[string]any{
+				"name": "swarm",
+				"args": map[string]any{
+					"action":    "add",
+					"name":      "coder",
+					"workspace": "inherit",
+					"brief":     "Build package",
+				},
+			},
+		})
+		var resp struct {
+			Decision  string         `json:"decision"`
+			Overwrite map[string]any `json:"overwrite"`
+		}
+		if err := json.Unmarshal([]byte(out), &resp); err != nil {
+			t.Fatalf("stdout is not JSON: %v (%q)", err, out)
+		}
+		if resp.Decision != "allow" || resp.Overwrite["workspace"] != "share" {
+			t.Errorf("got %+v, want decision=allow and overwrite.workspace=share", resp)
+		}
+
+		// Non-add swarm actions produce neutral empty stdout
+		for _, sub := range []string{"status", "kill", "models"} {
+			_, subOut, _ := runHookWith(t, args, map[string]any{
+				"workspacePaths": []string{filepath.Join(root, "main")},
+				"toolCall": map[string]any{
+					"name": "swarm",
+					"args": map[string]any{"action": sub, "name": "coder"},
+				},
+			})
+			if subOut != "" {
+				t.Errorf("swarm action=%q: got %q, want empty pass-through", sub, subOut)
+			}
+		}
+
+		// Read-only swarm role produces neutral empty stdout
+		_, roOut, _ := runHookWith(t, args, map[string]any{
+			"workspacePaths": []string{filepath.Join(root, "main")},
+			"toolCall": map[string]any{
+				"name": "swarm",
+				"args": map[string]any{"action": "add", "name": "narrator", "brief": "Summarize"},
+			},
+		})
+		if roOut != "" {
+			t.Errorf("read-only swarm worker got %q, want empty pass-through", roOut)
+		}
+	})
+}
+
 func TestHookSessionStartClaude(t *testing.T) {
 	root := setupHookWorkspace(t)
 	plain := t.TempDir()

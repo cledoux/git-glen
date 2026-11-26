@@ -1,10 +1,12 @@
 // Package hook implements the agent-neutral repository guardrails that back the
 // `glen hook` subcommand. Agent-specific payload parsing and response encoding
-// live in the CLI; this package only decides whether an action is allowed.
+// live in the CLI; this package only decides whether an action is allowed or
+// has tool arguments rewritten.
 package hook
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -15,23 +17,57 @@ import (
 // a non-empty value, for deliberate maintenance work directly on the default branch.
 const EnvAllowDefaultBranchEdits = "GLEN_ALLOW_MAIN_EDITS"
 
+// EnvAutoIsolate overrides automatic worktree isolation for spawned parallel
+// agents when set to a boolean value ("1"/"true" or "0"/"false").
+const EnvAutoIsolate = "GLEN_AUTO_ISOLATE"
+
+// SpawnAction describes an agent or worker spawn tool call from a coordinator.
+type SpawnAction struct {
+	// AgentIdent is the subagent type name or swarm worker roster name.
+	AgentIdent string
+	// Workspace is the requested workspace mode (e.g. "", "inherit", "share", "branch").
+	Workspace string
+	// WorkspaceKey is the exact tool argument key to overwrite (e.g. "Workspace" or "workspace").
+	WorkspaceKey string
+}
+
 // Action is a normalized tool call from any supported agent.
 type Action struct {
-	// Cwd resolves relative Paths.
+	// Cwd resolves relative Paths and repository configuration.
 	Cwd string
 	// Paths are files the tool will create or modify.
 	Paths []string
 	// Command is the shell command line, if the tool runs one.
 	Command string
+	// Spawn is populated when the tool spawns a subagent or swarm worker.
+	Spawn *SpawnAction
 }
 
-// Decision is the guard verdict. A zero Decision allows the action.
+// Decision is the guard verdict. A zero Decision allows the action untouched.
 type Decision struct {
-	Deny   bool
-	Reason string
+	Deny      bool
+	Reason    string
+	Overwrite map[string]any
 }
 
-// Evaluate applies every guard to the action and returns the first denial.
+var defaultReadOnlyAgentPatterns = []string{
+	"explore",
+	"plan",
+	"narrator",
+	"monitor",
+	"image-generator",
+	"doc_reviewer",
+	"doc-reviewer",
+	"research*",
+	"*researcher",
+	"*reviewer",
+	"*auditor",
+	"*verifier",
+	"verifier*",
+	"*guide",
+}
+
+// Evaluate applies every guard to the action and returns a denial or argument overwrite.
 func Evaluate(a Action) Decision {
 	if os.Getenv(EnvAllowDefaultBranchEdits) == "" {
 		for _, p := range a.Paths {
@@ -42,6 +78,11 @@ func Evaluate(a Action) Decision {
 	}
 	if a.Command != "" {
 		if d := checkDeleteBranchMerge(a.Command); d.Deny {
+			return d
+		}
+	}
+	if a.Spawn != nil {
+		if d := checkSpawnAutoIsolate(a.Cwd, *a.Spawn); len(d.Overwrite) > 0 {
 			return d
 		}
 	}
@@ -77,6 +118,74 @@ func FindWorkspace(dir string) (Workspace, bool) {
 		DefaultBranch: cfg.DefaultBranch,
 		ProtectMain:   cfg.ProtectMain,
 	}, true
+}
+
+func checkSpawnAutoIsolate(cwd string, sp SpawnAction) Decision {
+	if cwd == "" || sp.WorkspaceKey == "" {
+		return Decision{}
+	}
+	ws := strings.TrimSpace(sp.Workspace)
+	if ws != "" && !strings.EqualFold(ws, "inherit") {
+		return Decision{}
+	}
+
+	repo, ok := gitcfg.Discover(cwd)
+	if !ok {
+		return Decision{}
+	}
+	cfg := gitcfg.Load(repo)
+
+	enabled := cfg.AutoIsolate
+	if rawEnv, hasEnv := os.LookupEnv(EnvAutoIsolate); hasEnv && strings.TrimSpace(rawEnv) != "" {
+		switch strings.ToLower(strings.TrimSpace(rawEnv)) {
+		case "1", "true", "yes", "on":
+			enabled = true
+		case "0", "false", "no", "off":
+			enabled = false
+		}
+	}
+	if !enabled {
+		return Decision{}
+	}
+
+	if isReadOnlyAgent(sp.AgentIdent, cfg.ReadOnlyAgents) {
+		return Decision{}
+	}
+
+	return Decision{
+		Overwrite: map[string]any{
+			sp.WorkspaceKey: "share",
+		},
+	}
+}
+
+func isReadOnlyAgent(ident string, extraPatterns []string) bool {
+	norm := strings.ToLower(strings.TrimSpace(ident))
+	if norm == "" {
+		return false
+	}
+	for _, pat := range defaultReadOnlyAgentPatterns {
+		if matchAgentPattern(pat, norm) {
+			return true
+		}
+	}
+	for _, pat := range extraPatterns {
+		if matchAgentPattern(strings.ToLower(strings.TrimSpace(pat)), norm) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchAgentPattern(pattern, ident string) bool {
+	if pattern == "" {
+		return false
+	}
+	if pattern == ident {
+		return true
+	}
+	matched, err := path.Match(pattern, ident)
+	return err == nil && matched
 }
 
 func checkDefaultBranchEdit(cwd, path string) Decision {
