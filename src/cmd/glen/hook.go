@@ -29,7 +29,7 @@ func runHook(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	var agent, contextFile string
 	fs.StringVar(&agent, "agent", "", "Agent payload format: claude or agy")
-	fs.StringVar(&contextFile, "context-file", "", "session-start: Markdown file injected as context in Pure Bare workspaces")
+	fs.StringVar(&contextFile, "context-file", "", "session-start: Markdown file injected as context in glen-initialized workspaces")
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: glen hook <pre-tool-use|session-start> --agent=<claude|agy> [options]\n\n")

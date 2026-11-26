@@ -15,6 +15,7 @@ import (
 )
 
 func TestRunGlenCommand_Init(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -28,7 +29,7 @@ func TestRunGlenCommand_Init(t *testing.T) {
 		}
 
 		out := stdout.String()
-		if !strings.Contains(out, "=== Pure Bare Repository Initialized ===") {
+		if !strings.Contains(out, "=== Glen Workspace Initialized (bare) ===") {
 			t.Errorf("expected header in stdout, got: %s", out)
 		}
 		if !strings.Contains(out, "greenfield") {
@@ -63,9 +64,95 @@ func TestRunGlenCommand_Init(t *testing.T) {
 			t.Errorf("root .agents -> %q, want %q (err=%v)", got, filepath.Join("main", ".agents"), err)
 		}
 	})
+
+	t.Run("RejectsInvalidLayoutFlag", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := RunGlenCommand(ctx, []string{"init", "--layout=invalid", t.TempDir()}, &stdout, &stderr)
+		if code != 2 || !strings.Contains(stderr.String(), "unsupported layout") {
+			t.Errorf("got code=%d stderr=%q, want code 2 and unsupported layout message", code, stderr.String())
+		}
+	})
+}
+
+func TestRunGlenCommand_UninitializedCloneBehavior(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cloneDir := testutil.SetupStandardClone(t, false)
+
+	// 1. glen list reports uninitialized layout status clearly
+	var stdout, stderr bytes.Buffer
+	code := RunGlenCommand(ctx, []string{"list", "-C", cloneDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen list on uninitialized clone failed (%d): %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "uninitialized") {
+		t.Errorf("expected 'uninitialized' in glen list output, got:\n%s", stdout.String())
+	}
+
+	// 2. glen create fails fast with actionable remediation
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{"create", "feat/x", "-C", cloneDir, "--fetch=false"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected glen create on uninitialized clone to fail fast")
+	}
+	if !strings.Contains(stderr.String(), "--layout=subdir") {
+		t.Errorf("expected remediation mentioning --layout=subdir in stderr, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunGlenCommand_SubdirLifecycle(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Dirty clone initializes cleanly with --layout=subdir
+	cloneDir := testutil.SetupStandardClone(t, true)
+
+	var stdout, stderr bytes.Buffer
+	code := RunGlenCommand(ctx, []string{"init", "--layout=subdir", cloneDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen init --layout=subdir failed (%d): %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "=== Glen Workspace Initialized (subdir) ===") {
+		t.Errorf("unexpected init stdout:\n%s", stdout.String())
+	}
+
+	// Create nested feature worktree inside .worktrees/feat/subdir-test
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{
+		"create", "feat/subdir-test",
+		"-C", cloneDir,
+		"--fetch=false",
+		"--name", "Beckett",
+		"--email", "user+beckett@example.com",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen create in subdir failed (%d): %s", code, stderr.String())
+	}
+
+	expectedWT := filepath.Join(cloneDir, ".worktrees", "feat", "subdir-test")
+	if _, err := os.Stat(expectedWT); err != nil {
+		t.Fatalf("expected subdir worktree %s to exist: %v", expectedWT, err)
+	}
+
+	// Remove from inside the linked worktree itself
+	stdout.Reset()
+	stderr.Reset()
+	code = RunGlenCommand(ctx, []string{"remove", "feat/subdir-test", "-C", expectedWT}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("glen remove in subdir failed (%d): %s", code, stderr.String())
+	}
+	if _, err := os.Stat(expectedWT); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed", expectedWT)
+	}
 }
 
 func TestRunGlenCommand_Lifecycle(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -141,6 +228,7 @@ func TestRunGlenCommand_Lifecycle(t *testing.T) {
 }
 
 func TestRunGlenCommand_VSCodeWorkspaceSync(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -157,7 +245,7 @@ func TestRunGlenCommand_VSCodeWorkspaceSync(t *testing.T) {
 		t.Fatalf("expected no .code-workspace without --vscode, got err=%v", err)
 	}
 
-	// 2. Running glen init --vscode on the existing Pure Bare repo (bare-repair) creates .code-workspace
+	// 2. Running glen init --vscode on the existing bare repo (bare-repair) creates .code-workspace
 	stdout.Reset()
 	stderr.Reset()
 	code = RunGlenCommand(ctx, []string{"init", "--vscode", emptyDir}, &stdout, &stderr)

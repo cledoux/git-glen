@@ -17,7 +17,7 @@ build:
 test:
   timeout 60s go -C src test -v ./...
 
-# Warn when installing from a non-Pure-Bare repo or a non-default worktree
+# Warn when installing from an uninitialized repo or a non-default worktree
 _check-worktree:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -33,9 +33,8 @@ _check-worktree:
     [[ $reply == [yY]* ]] || { echo "Aborted."; exit 1; }
   }
   common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-  if [[ $(basename "$common") != .bare ]]; then
-    warn "$repo is not in a glen-managed (Pure Bare) workspace; installing from it anyway."
-  else
+  layout=$(git --git-dir="$common" config --get glen.layout 2>/dev/null || true)
+  if [[ $(basename "$common") == .bare ]]; then
     root=$(dirname "$common")
     default=$(git --git-dir="$common" symbolic-ref --quiet --short HEAD 2>/dev/null || echo main)
     if [[ $repo != "$root/$default" ]]; then
@@ -43,6 +42,15 @@ _check-worktree:
       warn "Installed links will point here and break if this worktree is removed."
       confirm "Install from this worktree?"
     fi
+  elif [[ $layout == subdir ]]; then
+    root=$(dirname "$common")
+    if [[ $repo != "$root" ]]; then
+      warn "installing from linked worktree $repo, not the primary checkout $root."
+      warn "Installed links will point here and break if this worktree is removed."
+      confirm "Install from this worktree?"
+    fi
+  else
+    warn "$repo is not in a glen-initialized workspace; installing from it anyway."
   fi
 
 # Point DEST at this repo's plugin/, replacing a stale pre-plugin/ install.

@@ -1,12 +1,12 @@
 {
-  "glen-pure-bare-guard": {
+  "glen-worktree-guard": {
     "PreToolUse": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "command -v glen >/dev/null 2>&1 && glen hook pre-tool-use --agent=agy || true",
+            "command": "g=$(command -v glen 2>/dev/null || printf '%s/.local/bin/glen' \"$HOME\"); [ -x \"$g\" ] && \"$g\" hook pre-tool-use --agent=agy || true",
             "timeout": 10
           }
         ]

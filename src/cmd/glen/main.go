@@ -63,34 +63,38 @@ func RunGlenCommand(ctx context.Context, args []string, stdout, stderr io.Writer
 func printGlenUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: glen <subcommand> [options] [arguments]\n")
 	fmt.Fprintf(w, "   or: git glen <subcommand> [options] [arguments]\n\n")
-	fmt.Fprintf(w, "Guided Git worktree and Pure Bare repository workflows.\n\n")
+	fmt.Fprintf(w, "Guided Git worktree isolation and repository workflows.\n\n")
 	fmt.Fprintf(w, "Subcommands:\n")
-	fmt.Fprintf(w, "  init [--vscode] [target]          Initialize, convert, migrate, or repair repository into Pure Bare topology\n")
-	fmt.Fprintf(w, "  list                              List active Git worktrees in the workspace\n")
-	fmt.Fprintf(w, "  create <branch-or-slug> [base]    Create an isolated worktree at <root>/<branch-name>\n")
-	fmt.Fprintf(w, "  remove <branch-or-slug>           Remove a feature worktree, prune locks, and delete its local branch\n")
-	fmt.Fprintf(w, "  prune                             Prune stale worktree metadata and locks (--expire now)\n")
-	fmt.Fprintf(w, "  repair [--vscode] [target]        Repair worktree pointers, root .git pointer, and bare config\n")
-	fmt.Fprintf(w, "  hook <event> --agent=<agent>      Agent lifecycle hook adapter (Claude Code, Antigravity)\n\n")
+	fmt.Fprintf(w, "  init [--layout=bare|subdir] [--vscode] [target]  Initialize, convert, migrate, or repair workspace\n")
+	fmt.Fprintf(w, "  list                                             List active Git worktrees in the workspace\n")
+	fmt.Fprintf(w, "  create <branch-or-slug> [base]                   Create an isolated worktree for a branch\n")
+	fmt.Fprintf(w, "  remove <branch-or-slug>                          Remove a feature worktree, prune locks, and delete its local branch\n")
+	fmt.Fprintf(w, "  prune                                            Prune stale worktree metadata and locks (--expire now)\n")
+	fmt.Fprintf(w, "  repair [--vscode] [target]                       Repair worktree pointers, config, and stale locks\n")
+	fmt.Fprintf(w, "  hook <event> --agent=<agent>                     Agent lifecycle hook adapter (Claude Code, Antigravity)\n\n")
 	fmt.Fprintf(w, "Common Options:\n")
-	fmt.Fprintf(w, "  -C <dir>                          Change effective directory before resolving workspace\n")
-	fmt.Fprintf(w, "  -h, --help                        Show this help message\n")
+	fmt.Fprintf(w, "  -C <dir>                                         Change effective directory before resolving workspace\n")
+	fmt.Fprintf(w, "  -h, --help                                       Show this help message\n")
 }
 
 func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("glen init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	var dir string
+	var dir, layoutFlag string
 	var vscode bool
 	fs.StringVar(&dir, "C", "", "Change directory before executing initialization")
+	fs.StringVar(&layoutFlag, "layout", "", "Repository worktree layout: bare (default) or subdir")
 	fs.BoolVar(&vscode, "vscode", false, "Create or update <repo>.code-workspace file at the workspace root")
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: glen init [options] [target]\n\n")
-		fmt.Fprintf(stderr, "Initializes, converts, migrates, or repairs a repository into a Pure Bare topology (.bare/ + .git + main/ + <branch>/).\n\n")
+		fmt.Fprintf(stderr, "Initializes, converts, migrates, or repairs a repository using the bare (default) or subdir layout.\n\n")
+		fmt.Fprintf(stderr, "Layouts:\n")
+		fmt.Fprintf(stderr, "  bare    .bare/ + .git + <default-branch>/ + <branch>/ (default)\n")
+		fmt.Fprintf(stderr, "  subdir  standard .git/ clone + .worktrees/<branch>/ in-place\n\n")
 		fmt.Fprintf(stderr, "Arguments:\n")
-		fmt.Fprintf(stderr, "  target        Remote Git URL (git@... or https://...), local directory, or omitted for current directory\n\n")
+		fmt.Fprintf(stderr, "  target  Remote Git URL (git@... or https://...), local directory, or omitted for current directory\n\n")
 		fmt.Fprintf(stderr, "Options:\n")
 		fs.PrintDefaults()
 	}
@@ -98,6 +102,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	positionals, err := parseFlagsAndArgs(fs, args)
 	if err != nil {
 		return 2
+	}
+
+	var parsedLayout worktree.Layout
+	if strings.TrimSpace(layoutFlag) != "" {
+		parsedLayout, err = worktree.ParseLayout(layoutFlag)
+		if err != nil {
+			fmt.Fprintf(stderr, "[ERROR] %v\n", err)
+			return 2
+		}
 	}
 
 	target := ""
@@ -119,12 +132,15 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 
 	mgr := worktree.NewManager("")
-	res, err := mgr.InitWithOptions(ctx, target, worktree.InitOptions{VSCode: vscode})
+	res, err := mgr.InitWithOptions(ctx, target, worktree.InitOptions{
+		Layout: parsedLayout,
+		VSCode: vscode,
+	})
 	if err != nil {
 		var dirtyErr *worktree.DirtyTreeError
 		if errors.As(err, &dirtyErr) {
 			fmt.Fprintf(stderr, "[ERROR] Working directory contains uncommitted changes or untracked files.\n")
-			fmt.Fprintf(stderr, "        glen init will not modify or restructure a dirty repository.\n\n")
+			fmt.Fprintf(stderr, "        glen init (--layout=bare) will not restructure a dirty repository.\n\n")
 			fmt.Fprintf(stderr, "Target directory: %s\n", dirtyErr.Dir)
 			fmt.Fprintf(stderr, "Dirty files detected:\n")
 			for _, f := range dirtyErr.Files {
@@ -134,6 +150,7 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "  1. Commit your changes:   git -C %s add -A && git -C %s commit -m \"WIP\"\n", dirtyErr.Dir, dirtyErr.Dir)
 			fmt.Fprintf(stderr, "  2. Or stash your changes: git -C %s stash --include-untracked\n", dirtyErr.Dir)
 			fmt.Fprintf(stderr, "  3. Re-run initialization: glen init %s\n", dirtyErr.Dir)
+			fmt.Fprintf(stderr, "  4. Or initialize in-place without moving files: glen init --layout=subdir %s\n", dirtyErr.Dir)
 			return 1
 		}
 
@@ -141,12 +158,17 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "=== Pure Bare Repository Initialized ===\n")
+	fmt.Fprintf(stdout, "=== Glen Workspace Initialized (%s) ===\n", res.Layout)
 	fmt.Fprintf(stdout, "Scenario:       %s\n", res.Scenario)
+	fmt.Fprintf(stdout, "Layout:         %s\n", res.Layout)
 	fmt.Fprintf(stdout, "Base Directory: %s\n", res.BaseDir)
-	fmt.Fprintf(stdout, "Bare Database:  %s\n", res.BareDir)
-	fmt.Fprintf(stdout, "Root Pointer:   %s/.git -> ./.bare\n", res.BaseDir)
-	fmt.Fprintf(stdout, "Main Worktree:  %s\n", res.MainDir)
+	if res.Layout == worktree.LayoutBare {
+		fmt.Fprintf(stdout, "Bare Database:  %s\n", res.BareDir)
+		fmt.Fprintf(stdout, "Root Pointer:   %s/.git -> ./.bare\n", res.BaseDir)
+		fmt.Fprintf(stdout, "Main Worktree:  %s\n", res.MainDir)
+	} else {
+		fmt.Fprintf(stdout, "Worktrees Dir:  %s\n", res.WorktreesDir)
+	}
 	fmt.Fprintf(stdout, "Default Branch: %s\n", res.DefaultBranch)
 	if res.VSCodeWorkspace != "" {
 		fmt.Fprintf(stdout, "VSCode File:    %s\n", res.VSCodeWorkspace)
@@ -155,11 +177,13 @@ func runInit(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "Agent Links:    %s\n", strings.Join(res.AgentLinks, ", "))
 	}
 	if res.Converted {
-		fmt.Fprintf(stdout, "Note:           Converted standard clone into Pure Bare topology in-place.\n")
+		fmt.Fprintf(stdout, "Note:           Converted standard clone into bare layout in-place.\n")
 	} else if res.Repaired {
-		fmt.Fprintf(stdout, "Note:           Repaired worktree pointers, refspecs, and pruned expired locks.\n")
+		fmt.Fprintf(stdout, "Note:           Repaired worktree pointers, config, and pruned expired locks.\n")
 	} else if res.Migrated {
-		fmt.Fprintf(stdout, "Note:           Migrated legacy sibling layout into Pure Bare topology.\n")
+		fmt.Fprintf(stdout, "Note:           Migrated legacy sibling layout into bare layout.\n")
+	} else if res.Scenario == worktree.ScenarioSubdirInit {
+		fmt.Fprintf(stdout, "Note:           Configured subdir layout in-place and excluded worktrees in .git/info/exclude.\n")
 	}
 	fmt.Fprintf(stdout, "\nWorkspace is ready. Run 'glen list' to inspect active worktrees.\n")
 	return 0
@@ -207,7 +231,13 @@ func runList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	layoutLabel := string(topo.Layout)
+	if !topo.Initialized || layoutLabel == "" {
+		layoutLabel = "uninitialized (run 'glen init' or 'glen init --layout=subdir')"
+	}
+
 	fmt.Fprintf(stdout, "=== Glen Workspace: %s ===\n", topo.Name)
+	fmt.Fprintf(stdout, "Layout:        %s\n", layoutLabel)
 	fmt.Fprintf(stdout, "Base Dir:      %s\n", topo.BaseDir)
 	fmt.Fprintf(stdout, "Git Database:  %s\n", topo.RepoDir)
 	fmt.Fprintf(stdout, "Worktrees Dir: %s\n\n", topo.WorktreesDir)
@@ -241,14 +271,14 @@ func runCreate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	var fetchRemote bool
 	fs.StringVar(&changeDirFlag, "C", "", "Change directory before resolving workspace")
 	fs.IntVar(&issueID, "issue", 0, "Optional issue number (formats branch as feat/<issue>-<slug>)")
-	fs.StringVar(&baseBranch, "base", "", "Base branch or ref (defaults to origin/main or main)")
+	fs.StringVar(&baseBranch, "base", "", "Base branch or ref (defaults to origin/<default> or <default>)")
 	fs.StringVar(&authorName, "name", "", "Per-worktree git user.name")
 	fs.StringVar(&authorEmail, "email", "", "Per-worktree git user.email")
 	fs.BoolVar(&fetchRemote, "fetch", true, "Fetch origin before creating worktree when remote is configured")
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: glen create [options] <branch-or-slug> [base-ref]\n\n")
-		fmt.Fprintf(stderr, "Creates an isolated worktree at <root>/<branch-name> with core.bare=false.\n\nOptions:\n")
+		fmt.Fprintf(stderr, "Creates an isolated worktree in the configured workspace layout.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 
@@ -269,6 +299,13 @@ func runCreate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	topo, err := worktree.DiscoverTopology("", changeDirFlag)
 	if err != nil {
 		fmt.Fprintf(stderr, "[ERROR] %v\n", err)
+		return 1
+	}
+	if !topo.Initialized {
+		fmt.Fprintf(stderr, "[ERROR] Repository at %s is not initialized with glen.\n", topo.BaseDir)
+		fmt.Fprintf(stderr, "        Initialize it first with one of:\n")
+		fmt.Fprintf(stderr, "          glen init %s                  # bare layout (.bare/ + main/ + <branch>/)\n", topo.BaseDir)
+		fmt.Fprintf(stderr, "          glen init --layout=subdir %s  # subdir layout (.git/ + .worktrees/<branch>/)\n", topo.BaseDir)
 		return 1
 	}
 
@@ -308,7 +345,7 @@ func runRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: glen remove [options] <branch-or-slug>\n\n")
-		fmt.Fprintf(stderr, "Removes an isolated worktree at <root>/<branch-name>, prunes locks, and deletes the local branch.\n\nOptions:\n")
+		fmt.Fprintf(stderr, "Removes an isolated worktree, prunes locks, and deletes the local branch.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 
@@ -330,7 +367,7 @@ func runRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 	cleanBranch := strings.Trim(strings.ReplaceAll(target, " ", "-"), "/")
 	wtPath := filepath.Clean(filepath.Join(topo.WorktreesDir, filepath.FromSlash(cleanBranch)))
-	if !topo.IsBare {
+	if !topo.IsBare && topo.Layout != worktree.LayoutSubdir {
 		dirSlug := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(target, "/", "-"), " ", "-"))
 		wtPath = filepath.Clean(filepath.Join(topo.WorktreesDir, dirSlug))
 	}
@@ -339,6 +376,9 @@ func runRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	mgr := worktree.NewManager(topo.RepoDir)
 	if wts, err := mgr.ListWorktrees(ctx); err == nil {
 		for _, wt := range wts {
+			if wt.Bare || (!topo.IsBare && filepath.Clean(wt.Path) == filepath.Clean(topo.BaseDir)) {
+				continue
+			}
 			if wt.Path == wtPath || wt.Branch == target || filepath.Base(wt.Path) == target {
 				wtPath = wt.Path
 				if wt.Branch != "" {
@@ -347,6 +387,11 @@ func runRemove(ctx context.Context, args []string, stdout, stderr io.Writer) int
 				break
 			}
 		}
+	}
+
+	if !topo.IsBare && filepath.Clean(wtPath) == filepath.Clean(topo.BaseDir) {
+		fmt.Fprintf(stderr, "[ERROR] Refusing to remove the primary repository checkout at %s\n", topo.BaseDir)
+		return 1
 	}
 
 	branchToDelete := branchName
